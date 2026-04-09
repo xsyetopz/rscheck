@@ -1,0 +1,33 @@
+[package]
+name = "rscheck-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme.workspace = true
+
+description = "CLI frontend for rscheck."
+
+[dependencies]
+rscheck = { path = "../rscheck" }
+
+clap = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+cargo_metadata = "0.19.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+toml = "0.8.23"
+
+[[bin]]
+name = "rscheck"
+path = "src/main.rs"
+
+[[bin]]
+name = "cargo-rscheck"
+path = "src/bin/cargo-rscheck.rs"
+
