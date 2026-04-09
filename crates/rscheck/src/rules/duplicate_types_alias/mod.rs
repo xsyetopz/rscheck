@@ -5,6 +5,7 @@ use crate::report::Finding;
 use crate::rules::{Rule, RuleInfo};
 use crate::span::Span;
 use quote::ToTokens;
+use std::collections::BTreeMap;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
@@ -40,8 +41,7 @@ impl Rule for DuplicateTypesAliasCandidateRule {
             };
             v.visit_file(ast);
 
-            let mut map: std::collections::BTreeMap<String, Vec<proc_macro2::Span>> =
-                std::collections::BTreeMap::new();
+            let mut map: BTreeMap<String, Vec<proc_macro2::Span>> = BTreeMap::new();
             for t in v.types {
                 if t.value.len() < self.cfg.min_len {
                     continue;
@@ -70,6 +70,7 @@ impl Rule for DuplicateTypesAliasCandidateRule {
                         "Introduce `type Alias = ...;` and use it consistently.".to_string(),
                     ),
                     evidence: None,
+                    fixes: Vec::new(),
                 });
             }
         }

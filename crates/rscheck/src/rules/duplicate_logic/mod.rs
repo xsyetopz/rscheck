@@ -6,7 +6,9 @@ use crate::rules::{Rule, RuleInfo};
 use crate::span::Span;
 use quote::ToTokens;
 use similar::TextDiff;
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::path::Path;
 use syn::spanned::Spanned;
 
 pub struct DuplicateLogicRule {
@@ -116,6 +118,7 @@ impl Rule for DuplicateLogicRule {
                     "Extract a shared helper or refactor to remove duplication.".to_string(),
                 ),
                 evidence: Some(evidence),
+                fixes: Vec::new(),
             });
         }
     }
@@ -140,7 +143,7 @@ struct FnBody {
     span: Span,
 }
 
-fn collect_functions(path: &std::path::Path, ast: &syn::File, out: &mut Vec<FnBody>) {
+fn collect_functions(path: &Path, ast: &syn::File, out: &mut Vec<FnBody>) {
     for item in &ast.items {
         match item {
             syn::Item::Fn(f) => {
@@ -225,11 +228,11 @@ fn fingerprint(tokens: &[String], k: usize) -> HashSet<u64> {
     }
     let mut out = HashSet::new();
     for win in tokens.windows(k) {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = DefaultHasher::new();
         for t in win {
-            std::hash::Hash::hash(t, &mut hasher);
+            t.hash(&mut hasher);
         }
-        out.insert(std::hash::Hasher::finish(&hasher));
+        out.insert(hasher.finish());
     }
     out
 }

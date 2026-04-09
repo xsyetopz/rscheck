@@ -473,6 +473,7 @@ dependencies = [
  "rscheck",
  "serde",
  "serde_json",
+ "similar",
  "thiserror",
  "toml",
  "tracing",

@@ -1,5 +1,6 @@
 use rscheck::report::{Finding, Report, Severity};
 use serde::Serialize;
+use std::collections::BTreeSet;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,7 +81,7 @@ pub struct Region {
 }
 
 pub fn to_sarif(report: &Report) -> SarifLog {
-    let mut unique_rules: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut unique_rules: BTreeSet<String> = BTreeSet::new();
     for f in &report.findings {
         unique_rules.insert(f.rule_id.clone());
     }

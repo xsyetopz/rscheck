@@ -1,5 +1,6 @@
 mod cargo_clippy;
 mod config_file;
+mod fix_apply;
 mod report_html;
 mod report_sarif;
 
@@ -9,10 +10,13 @@ use config_file::{
     FileConfig, OutputFormat, default_config_path, workspace_root, write_default_config,
 };
 use rscheck::analysis::Workspace;
-use rscheck::report::Report;
+use rscheck::report::{FixSafety, Report};
 use rscheck::rules;
 use rscheck::runner::Runner;
+use fix_apply::{apply_planned_edits, plan_edits, print_dry_run};
 use std::path::PathBuf;
+use std::process::ExitCode as ProcessExitCode;
+use std::{fs, io};
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -25,8 +29,8 @@ impl From<i32> for ExitCode {
 }
 
 impl std::process::Termination for ExitCode {
-    fn report(self) -> std::process::ExitCode {
-        std::process::ExitCode::from(self.0 as u8)
+    fn report(self) -> ProcessExitCode {
+        ProcessExitCode::from(self.0 as u8)
     }
 }
 
@@ -87,7 +91,19 @@ pub struct CheckArgs {
     #[arg(long, default_value_t = true)]
     pub rscheck: bool,
 
-    #[arg(last = true, trailing_var_arg = true)]
+    #[arg(long)]
+    pub write: bool,
+
+    #[arg(long = "unsafe")]
+    pub unsafe_fixes: bool,
+
+    #[arg(long)]
+    pub dry_run: bool,
+
+    #[arg(long, default_value_t = 10)]
+    pub max_fix_iterations: u32,
+
+    #[arg(trailing_var_arg = true)]
     pub cargo_args: Vec<String>,
 }
 
@@ -161,6 +177,11 @@ fn run_init(args: InitArgs) -> ExitCode {
 }
 
 fn run_check(args: CheckArgs) -> ExitCode {
+    if args.write && args.dry_run {
+        eprintln!("`--write` and `--dry-run` are mutually exclusive");
+        return ExitCode::from(2);
+    }
+
     let root = match workspace_root() {
         Ok(root) => root,
         Err(err) => {
@@ -195,36 +216,96 @@ fn run_check(args: CheckArgs) -> ExitCode {
         file_config.output.with_clippy = with_clippy;
     }
 
-    let ws = match Workspace::new(root).load_files(&file_config.core) {
-        Ok(ws) => ws,
-        Err(err) => {
-            eprintln!("{err}");
-            return ExitCode::from(2);
-        }
+    let wants_fix = args.write || args.dry_run;
+    let mut last_report = Report::default();
+
+    let iterations = if wants_fix {
+        args.max_fix_iterations.max(1)
+    } else {
+        1
     };
 
-    let mut report = Report::default();
-
-    if args.rscheck {
-        report = Runner::run(&ws, &file_config.core);
-    }
-
-    if file_config.output.with_clippy {
-        match run_clippy(&ws.root, &args.cargo_args) {
-            Ok(mut findings) => report.findings.append(&mut findings),
+    for iter in 0..iterations {
+        let mut report = Report::default();
+        let ws = match Workspace::new(root.clone()).load_files(&file_config.core) {
+            Ok(ws) => ws,
             Err(err) => {
                 eprintln!("{err}");
                 return ExitCode::from(2);
             }
+        };
+
+        if args.rscheck {
+            report = Runner::run(&ws, &file_config.core);
         }
+        if file_config.output.with_clippy {
+            match run_clippy(&ws.root, &args.cargo_args) {
+                Ok(mut findings) => report.findings.append(&mut findings),
+                Err(err) => {
+                    eprintln!("{err}");
+                    return ExitCode::from(2);
+                }
+            }
+        }
+
+        let planned = plan_edits(&report, args.unsafe_fixes);
+
+        if args.dry_run {
+            match print_dry_run(&planned) {
+                Ok(would_change) => {
+                    if let Err(err) = write_report(&report, &file_config) {
+                        eprintln!("{err}");
+                        return ExitCode::from(2);
+                    }
+                    return ExitCode::from(if would_change { 1 } else { 0 });
+                }
+                Err(err) => {
+                    eprintln!("{err}");
+                    return ExitCode::from(2);
+                }
+            }
+        }
+
+        if args.write {
+            if planned.is_empty() {
+                last_report = report;
+                break;
+            }
+            match apply_planned_edits(&planned) {
+                Ok(applied) => {
+                    if !applied {
+                        last_report = report;
+                        break;
+                    }
+                }
+                Err(err) => {
+                    eprintln!("{err}");
+                    return ExitCode::from(2);
+                }
+            }
+
+            // If we applied edits, keep looping to reach a fixed point.
+            last_report = report;
+            if iter + 1 == iterations {
+                break;
+            }
+            continue;
+        }
+
+        // No fixing requested: just emit output once.
+        if let Err(err) = write_report(&report, &file_config) {
+            eprintln!("{err}");
+            return ExitCode::from(2);
+        }
+        return ExitCode::from(report.worst_severity().exit_code());
     }
 
-    if let Err(err) = write_report(&report, &file_config) {
+    if let Err(err) = write_report(&last_report, &file_config) {
         eprintln!("{err}");
         return ExitCode::from(2);
     }
 
-    ExitCode::from(report.worst_severity().exit_code())
+    ExitCode::from(last_report.worst_severity().exit_code())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -232,7 +313,7 @@ pub enum OutputError {
     #[error("failed to serialize report")]
     Serialize(#[source] serde_json::Error),
     #[error("failed to write output")]
-    Write(#[source] std::io::Error),
+    Write(#[source] io::Error),
 }
 
 fn write_report(report: &Report, config: &FileConfig) -> Result<(), OutputError> {
@@ -247,7 +328,7 @@ fn write_report(report: &Report, config: &FileConfig) -> Result<(), OutputError>
     };
 
     match &config.output.output {
-        Some(path) => std::fs::write(path, text).map_err(OutputError::Write),
+        Some(path) => fs::write(path, text).map_err(OutputError::Write),
         None => {
             print!("{text}");
             Ok(())
@@ -258,15 +339,28 @@ fn write_report(report: &Report, config: &FileConfig) -> Result<(), OutputError>
 fn human_report(report: &Report) -> String {
     let mut out = String::new();
     for f in &report.findings {
+        let fixable = f.fixes.iter().any(|fx| fx.safety == FixSafety::Safe);
         match &f.primary {
             Some(span) => {
                 out.push_str(&format!(
-                    "{}:{}:{}: {:?}[{}]: {}\n",
-                    span.file, span.start.line, span.start.column, f.severity, f.rule_id, f.message
+                    "{}:{}:{}: {:?}[{}]: {}{}\n",
+                    span.file,
+                    span.start.line,
+                    span.start.column,
+                    f.severity,
+                    f.rule_id,
+                    f.message,
+                    if fixable { " (fixable)" } else { "" }
                 ));
             }
             None => {
-                out.push_str(&format!("{:?}[{}]: {}\n", f.severity, f.rule_id, f.message));
+                out.push_str(&format!(
+                    "{:?}[{}]: {}{}\n",
+                    f.severity,
+                    f.rule_id,
+                    f.message,
+                    if fixable { " (fixable)" } else { "" }
+                ));
             }
         }
     }

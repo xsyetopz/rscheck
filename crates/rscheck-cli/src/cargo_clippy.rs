@@ -1,16 +1,16 @@
 use cargo_metadata::{Message, diagnostic::DiagnosticLevel};
-use rscheck::report::{Finding, Severity};
+use rscheck::report::{Fix, FixSafety, Finding, Severity, TextEdit};
 use rscheck::span::{Location, Span};
-use std::io::BufReader;
+use std::io::{self, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CargoError {
     #[error("failed to spawn cargo")]
-    Spawn(#[source] std::io::Error),
+    Spawn(#[source] io::Error),
     #[error("failed to read cargo output")]
-    Read(#[source] std::io::Error),
+    Read(#[source] io::Error),
     #[error("cargo exited with non-zero status: {0}")]
     Status(i32),
 }
@@ -35,7 +35,7 @@ pub fn run_clippy(
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| CargoError::Spawn(std::io::Error::other("cargo stdout missing")))?;
+        .ok_or_else(|| CargoError::Spawn(io::Error::other("cargo stdout missing")))?;
 
     let reader = BufReader::new(stdout);
     let mut findings = Vec::new();
@@ -83,6 +83,29 @@ fn diagnostic_to_finding(diag: &cargo_metadata::diagnostic::Diagnostic) -> Optio
         )
     });
 
+    let mut fixes = Vec::new();
+    for (idx, span) in diag.spans.iter().enumerate() {
+        let Some(repl) = &span.suggested_replacement else { continue };
+        let safety = match span.suggestion_applicability {
+            Some(cargo_metadata::diagnostic::Applicability::MachineApplicable) => FixSafety::Safe,
+            _ => FixSafety::Unsafe,
+        };
+        fixes.push(Fix {
+            id: format!(
+                "{}::clippy_suggestion::{idx}",
+                diag.code.as_ref().map_or("clippy", |c| c.code.as_str())
+            ),
+            safety,
+            message: span.label.clone().unwrap_or_else(|| "apply suggestion".to_string()),
+            edits: vec![TextEdit {
+                file: span.file_name.clone(),
+                byte_start: span.byte_start,
+                byte_end: span.byte_end,
+                replacement: repl.clone(),
+            }],
+        });
+    }
+
     Some(Finding {
         rule_id: diag
             .code
@@ -94,5 +117,6 @@ fn diagnostic_to_finding(diag: &cargo_metadata::diagnostic::Diagnostic) -> Optio
         secondary: Vec::new(),
         help: None,
         evidence: None,
+        fixes,
     })
 }

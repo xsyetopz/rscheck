@@ -4,6 +4,7 @@ use crate::emit::Emitter;
 use crate::report::{FileMetrics, Finding};
 use crate::rules::{Rule, RuleInfo};
 use crate::span::{Location, Span};
+use std::path::Path;
 use syn::visit::Visit;
 
 pub struct FileComplexityRule {
@@ -79,6 +80,7 @@ impl Rule for FileComplexityRule {
                                     .to_string(),
                             ),
                             evidence: Some(format_per_fn(&v.per_fn)),
+                            fixes: Vec::new(),
                         });
                     }
                 }
@@ -96,6 +98,7 @@ impl Rule for FileComplexityRule {
                             secondary: Vec::new(),
                             help: Some("Refactor: split file into smaller modules.".to_string()),
                             evidence: None,
+                            fixes: Vec::new(),
                         });
                     }
                 }
@@ -112,6 +115,7 @@ impl Rule for FileComplexityRule {
                             secondary: Vec::new(),
                             help: Some("Refactor: split file into smaller modules.".to_string()),
                             evidence: None,
+                            fixes: Vec::new(),
                         });
                     }
                 }
@@ -120,7 +124,7 @@ impl Rule for FileComplexityRule {
     }
 }
 
-fn file_span(path: &std::path::Path) -> Span {
+fn file_span(path: &Path) -> Span {
     Span::new(
         path,
         Location { line: 1, column: 1 },

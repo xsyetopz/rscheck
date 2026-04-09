@@ -33,11 +33,40 @@ pub struct AbsoluteModulePathsConfig {
     pub level: Level,
     #[serde(default)]
     pub allow_prefixes: Vec<String>,
+    #[serde(default = "AbsoluteModulePathsConfig::default_roots")]
+    pub roots: Vec<String>,
+    #[serde(default = "AbsoluteModulePathsConfig::default_allow_crate_root_macros")]
+    pub allow_crate_root_macros: bool,
+    #[serde(default = "AbsoluteModulePathsConfig::default_allow_crate_root_consts")]
+    pub allow_crate_root_consts: bool,
+    #[serde(default = "AbsoluteModulePathsConfig::default_allow_crate_root_fn_calls")]
+    pub allow_crate_root_fn_calls: bool,
 }
 
 impl AbsoluteModulePathsConfig {
     fn default_level() -> Level {
         Level::Deny
+    }
+
+    fn default_roots() -> Vec<String> {
+        vec![
+            "std".to_string(),
+            "core".to_string(),
+            "alloc".to_string(),
+            "crate".to_string(),
+        ]
+    }
+
+    fn default_allow_crate_root_macros() -> bool {
+        true
+    }
+
+    fn default_allow_crate_root_consts() -> bool {
+        true
+    }
+
+    fn default_allow_crate_root_fn_calls() -> bool {
+        true
     }
 }
 
@@ -46,6 +75,10 @@ impl Default for AbsoluteModulePathsConfig {
         Self {
             level: Level::Deny,
             allow_prefixes: Vec::new(),
+            roots: Self::default_roots(),
+            allow_crate_root_macros: true,
+            allow_crate_root_consts: true,
+            allow_crate_root_fn_calls: true,
         }
     }
 }

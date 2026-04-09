@@ -55,6 +55,7 @@ impl Rule for SrpHeuristicRule {
                             .to_string(),
                     ),
                     evidence: None,
+                    fixes: Vec::new(),
                 });
             }
         }

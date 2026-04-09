@@ -6,6 +6,7 @@ use crate::rules::{Rule, RuleInfo};
 use crate::span::{Location, Span};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use regex::RegexSet;
+use std::iter;
 use std::path::Path;
 use syn::visit::Visit;
 
@@ -65,7 +66,7 @@ impl Rule for AbsoluteFilesystemPathsRule {
 }
 
 struct Visitor<'a> {
-    file_path: &'a std::path::Path,
+    file_path: &'a Path,
     allow_globs: &'a GlobSet,
     allow_regex: &'a RegexSet,
     severity: Severity,
@@ -94,6 +95,7 @@ impl Visitor<'_> {
                 "Prefer relative paths or build paths via `PathBuf` at runtime.".to_string(),
             ),
             evidence: None,
+            fixes: Vec::new(),
         });
     }
 }
@@ -107,6 +109,14 @@ impl<'ast> Visit<'ast> for Visitor<'_> {
 
 fn absolute_kind(s: &str) -> Option<&'static str> {
     if s.starts_with('/') {
+        // Avoid false positives for common Rust comment/doc markers that show up as string literals
+        // (e.g. code that checks `trimmed.starts_with("//!")`).
+        if s.starts_with("//") || s.starts_with("/*") {
+            return None;
+        }
+        if s.trim_start_matches('/').is_empty() {
+            return None;
+        }
         return Some("unix");
     }
     if s.len() >= 3 {
@@ -119,7 +129,12 @@ fn absolute_kind(s: &str) -> Option<&'static str> {
         }
     }
     if s.starts_with(r"\\") {
-        return Some("unc");
+        let rest = s.trim_start_matches('\\');
+        let segments = rest.split('\\').filter(|p| !p.is_empty()).take(2).count();
+        if segments >= 2 {
+            return Some("unc");
+        }
+        return None;
     }
     None
 }
@@ -162,6 +177,7 @@ fn scan_line_comments(
                 secondary: Vec::new(),
                 help: None,
                 evidence: None,
+                fixes: Vec::new(),
             });
         }
     }
@@ -180,7 +196,7 @@ fn build_allow_globs(patterns: &[String]) -> GlobSet {
 
 fn build_allow_regex(patterns: &[String]) -> RegexSet {
     RegexSet::new(patterns.iter().map(String::as_str))
-        .unwrap_or_else(|_| RegexSet::new(std::iter::empty::<&str>()).unwrap())
+        .unwrap_or_else(|_| RegexSet::new(iter::empty::<&'static str>()).unwrap())
 }
 
 #[cfg(test)]

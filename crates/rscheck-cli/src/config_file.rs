@@ -1,6 +1,7 @@
 use rscheck::config::Config as CoreConfig;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -54,7 +55,7 @@ pub enum ConfigError {
     #[error("failed to read config file: {path}")]
     Read {
         path: PathBuf,
-        source: std::io::Error,
+        source: io::Error,
     },
     #[error("failed to parse config file: {path}")]
     Parse {
@@ -64,7 +65,7 @@ pub enum ConfigError {
     #[error("failed to write config file: {path}")]
     Write {
         path: PathBuf,
-        source: std::io::Error,
+        source: io::Error,
     },
     #[error("failed to serialize default config")]
     Serialize(#[source] toml::ser::Error),
@@ -72,7 +73,7 @@ pub enum ConfigError {
 
 impl FileConfig {
     pub fn load_from(path: &Path) -> Result<Self, ConfigError> {
-        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+        let text = fs::read_to_string(path).map_err(|source| ConfigError::Read {
             path: path.to_path_buf(),
             source,
         })?;
@@ -86,7 +87,7 @@ impl FileConfig {
 pub fn write_default_config(path: &Path) -> Result<(), ConfigError> {
     let config = FileConfig::default();
     let toml = toml::to_string_pretty(&config).map_err(ConfigError::Serialize)?;
-    std::fs::write(path, toml).map_err(|source| ConfigError::Write {
+    fs::write(path, toml).map_err(|source| ConfigError::Write {
         path: path.to_path_buf(),
         source,
     })

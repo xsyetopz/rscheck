@@ -3,9 +3,10 @@ use crate::analysis::{SourceFile, Workspace};
 use crate::config::{Config, DuplicateTypesAliasConfig, Level};
 use crate::emit::ReportEmitter;
 use crate::rules::Rule;
+use std::path::PathBuf;
 
 fn ws_with_single_file(code: &str) -> Workspace {
-    let root = std::path::PathBuf::from(".");
+    let root = PathBuf::from(".");
     let path = root.join("rscheck_test.rs");
     let ast = syn::parse_file(code).ok();
     Workspace {

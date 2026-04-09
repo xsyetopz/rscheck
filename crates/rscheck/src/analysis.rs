@@ -1,7 +1,7 @@
 use crate::config::Config;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
-use std::path::PathBuf;
+use std::{fs, io, path::PathBuf};
 
 #[derive(Clone)]
 pub struct SourceFile {
@@ -28,7 +28,7 @@ pub enum DiscoverError {
     Read {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
 }
 
@@ -69,7 +69,7 @@ impl Workspace {
                 continue;
             }
 
-            let text = std::fs::read_to_string(path).map_err(|source| DiscoverError::Read {
+            let text = fs::read_to_string(path).map_err(|source| DiscoverError::Read {
                 path: path.to_path_buf(),
                 source,
             })?;

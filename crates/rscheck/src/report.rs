@@ -21,6 +21,30 @@ impl Severity {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FixSafety {
+    Safe,
+    Unsafe,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextEdit {
+    pub file: String,
+    pub byte_start: u32,
+    pub byte_end: u32,
+    pub replacement: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Fix {
+    pub id: String,
+    pub safety: FixSafety,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<TextEdit>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub rule_id: String,
@@ -34,6 +58,8 @@ pub struct Finding {
     pub help: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixes: Vec<Fix>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
