@@ -1,9 +1,8 @@
 use super::AbsoluteFilesystemPathsRule;
 use crate::analysis::{SourceFile, Workspace};
-use crate::config::AbsoluteFilesystemPathsConfig;
-use crate::config::Config;
+use crate::config::{Level, Policy, RuleSettings};
 use crate::emit::ReportEmitter;
-use crate::rules::Rule;
+use crate::rules::{Rule, RuleContext};
 use std::path::PathBuf;
 
 fn ws_with_single_file(code: &str) -> Workspace {
@@ -32,13 +31,16 @@ fn f() {
 "#,
     );
 
-    let cfg = Config::default();
-    let mut emitter = ReportEmitter::new();
-    AbsoluteFilesystemPathsRule::new(AbsoluteFilesystemPathsConfig::default()).run(
-        &ws,
-        &cfg,
-        &mut emitter,
+    let mut cfg = Policy::default();
+    cfg.rules.insert(
+        "portability.absolute_literal_paths".to_string(),
+        RuleSettings {
+            level: Some(Level::Warn),
+            options: toml::Table::new(),
+        },
     );
+    let mut emitter = ReportEmitter::new();
+    AbsoluteFilesystemPathsRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
 
     assert_eq!(emitter.findings.len(), 1);
     assert!(emitter.findings[0].message.contains("/etc/passwd"));
@@ -54,13 +56,16 @@ fn f(line: &str) -> bool {
 "#,
     );
 
-    let cfg = Config::default();
-    let mut emitter = ReportEmitter::new();
-    AbsoluteFilesystemPathsRule::new(AbsoluteFilesystemPathsConfig::default()).run(
-        &ws,
-        &cfg,
-        &mut emitter,
+    let mut cfg = Policy::default();
+    cfg.rules.insert(
+        "portability.absolute_literal_paths".to_string(),
+        RuleSettings {
+            level: Some(Level::Warn),
+            options: toml::Table::new(),
+        },
     );
+    let mut emitter = ReportEmitter::new();
+    AbsoluteFilesystemPathsRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
 
     assert!(emitter.findings.is_empty());
 }

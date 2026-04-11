@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::Policy;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
 use std::{fs, io, path::PathBuf};
@@ -41,9 +41,9 @@ impl Workspace {
         }
     }
 
-    pub fn load_files(mut self, config: &Config) -> Result<Self, DiscoverError> {
-        let include = build_globset(&config.include)?;
-        let exclude = build_globset(&config.exclude)?;
+    pub fn load_files(mut self, policy: &Policy) -> Result<Self, DiscoverError> {
+        let include = build_globset(&policy.workspace.include)?;
+        let exclude = build_globset(&policy.workspace.exclude)?;
 
         let walker = WalkBuilder::new(&self.root)
             .hidden(false)

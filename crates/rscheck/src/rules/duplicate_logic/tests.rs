@@ -1,8 +1,8 @@
 use super::DuplicateLogicRule;
 use crate::analysis::{SourceFile, Workspace};
-use crate::config::{Config, DuplicateLogicConfig, Level};
+use crate::config::{Level, Policy, RuleSettings};
 use crate::emit::ReportEmitter;
-use crate::rules::Rule;
+use crate::rules::{Rule, RuleContext};
 use std::path::PathBuf;
 
 fn ws_with_single_file(code: &str) -> Workspace {
@@ -34,17 +34,22 @@ fn b(y: i32) -> i32 {
 "#,
     );
 
-    let cfg = Config::default();
+    let mut cfg = Policy::default();
+    cfg.rules.insert(
+        "shape.duplicate_logic".to_string(),
+        RuleSettings {
+            level: Some(Level::Warn),
+            options: toml::toml! {
+                min_tokens = 10
+                threshold = 0.5
+                max_results = 10
+                exclude_globs = []
+                kgram = 5
+            },
+        },
+    );
     let mut emitter = ReportEmitter::new();
-    DuplicateLogicRule::new(DuplicateLogicConfig {
-        level: Level::Warn,
-        min_tokens: 10,
-        threshold: 0.5,
-        max_results: 10,
-        exclude_globs: vec![],
-        kgram: 5,
-    })
-    .run(&ws, &cfg, &mut emitter);
+    DuplicateLogicRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
 
     assert_eq!(emitter.findings.len(), 1);
     assert!(emitter.findings[0].message.contains("similarity"));

@@ -1,27 +1,27 @@
 use crate::analysis::Workspace;
-use crate::config::{Config, DuplicateTypesAliasConfig};
+use crate::config::DuplicateTypesAliasConfig;
 use crate::emit::Emitter;
 use crate::report::Finding;
-use crate::rules::{Rule, RuleInfo};
+use crate::rules::{Rule, RuleBackend, RuleContext, RuleFamily, RuleInfo};
 use crate::span::Span;
 use quote::ToTokens;
 use std::collections::BTreeMap;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
-pub struct DuplicateTypesAliasCandidateRule {
-    cfg: DuplicateTypesAliasConfig,
-}
+pub struct DuplicateTypesAliasCandidateRule;
 
 impl DuplicateTypesAliasCandidateRule {
-    pub fn new(cfg: DuplicateTypesAliasConfig) -> Self {
-        Self { cfg }
-    }
-
     pub fn static_info() -> RuleInfo {
         RuleInfo {
-            id: "rscheck::duplicate_types_alias_candidate",
+            id: "design.repeated_type_aliases",
+            family: RuleFamily::Design,
+            backend: RuleBackend::Syntax,
             summary: "Finds repeated identical type annotations that could be extracted into a `type` alias.",
+            default_level: DuplicateTypesAliasConfig::default().level,
+            schema: "level, min_occurrences, min_len, exclude_outer",
+            config_example: "[rules.\"design.repeated_type_aliases\"]\nlevel = \"warn\"\nmin_occurrences = 3",
+            fixable: false,
         }
     }
 }
@@ -31,26 +31,32 @@ impl Rule for DuplicateTypesAliasCandidateRule {
         Self::static_info()
     }
 
-    fn run(&self, ws: &Workspace, _config: &Config, out: &mut dyn Emitter) {
-        let severity = self.cfg.level.to_severity();
+    fn run(&self, ws: &Workspace, ctx: &RuleContext<'_>, out: &mut dyn Emitter) {
         for file in &ws.files {
+            let cfg = match ctx
+                .policy
+                .decode_rule::<DuplicateTypesAliasConfig>(Self::static_info().id, Some(&file.path))
+            {
+                Ok(cfg) => cfg,
+                Err(_) => continue,
+            };
             let Some(ast) = &file.ast else { continue };
             let mut v = TypeCollector {
-                exclude_outer: &self.cfg.exclude_outer,
+                exclude_outer: &cfg.exclude_outer,
                 types: Vec::new(),
             };
             v.visit_file(ast);
 
             let mut map: BTreeMap<String, Vec<proc_macro2::Span>> = BTreeMap::new();
             for t in v.types {
-                if t.value.len() < self.cfg.min_len {
+                if t.value.len() < cfg.min_len {
                     continue;
                 }
                 map.entry(t.value).or_default().push(t.span);
             }
 
             for (ty, spans) in map {
-                if spans.len() < self.cfg.min_occurrences {
+                if spans.len() < cfg.min_occurrences {
                     continue;
                 }
                 let primary = spans
@@ -59,7 +65,9 @@ impl Rule for DuplicateTypesAliasCandidateRule {
                     .map(|s| Span::from_pm_span(&file.path, s));
                 out.emit(Finding {
                     rule_id: Self::static_info().id.to_string(),
-                    severity,
+                    family: Some(Self::static_info().family),
+                    engine: Some(Self::static_info().backend),
+                    severity: cfg.level.to_severity(),
                     message: format!(
                         "type is repeated {} times; consider a type alias: {ty}",
                         spans.len()
@@ -70,6 +78,8 @@ impl Rule for DuplicateTypesAliasCandidateRule {
                         "Introduce `type Alias = ...;` and use it consistently.".to_string(),
                     ),
                     evidence: None,
+                    confidence: None,
+                    tags: vec!["types".to_string()],
                     fixes: Vec::new(),
                 });
             }

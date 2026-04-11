@@ -1,9 +1,9 @@
 use super::AbsoluteModulePathsRule;
 use crate::analysis::{SourceFile, Workspace};
-use crate::config::{AbsoluteModulePathsConfig, Config};
+use crate::config::{Level, Policy, RuleSettings};
 use crate::emit::ReportEmitter;
 use crate::fix::apply_text_edits;
-use crate::rules::Rule;
+use crate::rules::{Rule, RuleContext};
 use std::path::PathBuf;
 
 fn ws_with_single_file(code: &str) -> Workspace {
@@ -39,9 +39,16 @@ fn f() {
 "#,
     );
 
-    let cfg = Config::default();
+    let mut cfg = Policy::default();
+    cfg.rules.insert(
+        "architecture.qualified_module_paths".to_string(),
+        RuleSettings {
+            level: Some(Level::Deny),
+            options: toml::Table::new(),
+        },
+    );
     let mut emitter = ReportEmitter::new();
-    AbsoluteModulePathsRule::new(AbsoluteModulePathsConfig::default()).run(&ws, &cfg, &mut emitter);
+    AbsoluteModulePathsRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
 
     assert!(emitter.findings.iter().any(|f| f.message.contains("::std")));
     assert!(
@@ -80,9 +87,16 @@ fn f() {
 "#;
     let ws = ws_with_single_file(code);
 
-    let cfg = Config::default();
+    let mut cfg = Policy::default();
+    cfg.rules.insert(
+        "architecture.qualified_module_paths".to_string(),
+        RuleSettings {
+            level: Some(Level::Deny),
+            options: toml::Table::new(),
+        },
+    );
     let mut emitter = ReportEmitter::new();
-    AbsoluteModulePathsRule::new(AbsoluteModulePathsConfig::default()).run(&ws, &cfg, &mut emitter);
+    AbsoluteModulePathsRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
 
     let finding = emitter
         .findings
@@ -97,4 +111,3 @@ fn f() {
     assert!(new_code.contains("let _p: PathBuf"));
     assert!(new_code.contains("PathBuf::from"));
 }
-

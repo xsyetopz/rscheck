@@ -81,17 +81,28 @@ pub struct Region {
 }
 
 pub fn to_sarif(report: &Report) -> SarifLog {
-    let mut unique_rules: BTreeSet<String> = BTreeSet::new();
-    for f in &report.findings {
-        unique_rules.insert(f.rule_id.clone());
-    }
-    let rules = unique_rules
-        .iter()
-        .map(|id| Rule {
-            id: id.clone(),
-            name: id.clone(),
-        })
-        .collect::<Vec<_>>();
+    let rules = if report.rule_catalog.is_empty() {
+        let mut unique_rules: BTreeSet<String> = BTreeSet::new();
+        for f in &report.findings {
+            unique_rules.insert(f.rule_id.clone());
+        }
+        unique_rules
+            .iter()
+            .map(|id| Rule {
+                id: id.clone(),
+                name: id.clone(),
+            })
+            .collect::<Vec<_>>()
+    } else {
+        report
+            .rule_catalog
+            .iter()
+            .map(|entry| Rule {
+                id: entry.id.clone(),
+                name: entry.summary.clone(),
+            })
+            .collect::<Vec<_>>()
+    };
 
     SarifLog {
         version: "2.1.0",

@@ -1,9 +1,9 @@
 use crate::analysis::Workspace;
-use crate::config::{AbsoluteModulePathsConfig, Config};
+use crate::config::AbsoluteModulePathsConfig;
 use crate::emit::Emitter;
 use crate::fix::{find_use_insertion_offset, line_col_to_byte_offset};
 use crate::report::{Finding, Fix, FixSafety, Severity, TextEdit};
-use crate::rules::{Rule, RuleInfo};
+use crate::rules::{Rule, RuleBackend, RuleContext, RuleFamily, RuleInfo};
 use crate::span::Span;
 use quote::ToTokens;
 use std::collections::HashSet;
@@ -11,19 +11,19 @@ use std::path::Path;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
-pub struct AbsoluteModulePathsRule {
-    cfg: AbsoluteModulePathsConfig,
-}
+pub struct AbsoluteModulePathsRule;
 
 impl AbsoluteModulePathsRule {
-    pub fn new(cfg: AbsoluteModulePathsConfig) -> Self {
-        Self { cfg }
-    }
-
     pub fn static_info() -> RuleInfo {
         RuleInfo {
-            id: "rscheck::absolute_module_paths",
+            id: "architecture.qualified_module_paths",
+            family: RuleFamily::Architecture,
+            backend: RuleBackend::Syntax,
             summary: "Flags leading-`::` module paths anywhere in the codebase.",
+            default_level: AbsoluteModulePathsConfig::default().level,
+            schema: "level, allow_prefixes, roots, allow_crate_root_macros, allow_crate_root_consts, allow_crate_root_fn_calls",
+            config_example: "[rules.\"architecture.qualified_module_paths\"]\nlevel = \"deny\"\nroots = [\"std\", \"core\", \"alloc\", \"crate\"]",
+            fixable: true,
         }
     }
 }
@@ -33,19 +33,25 @@ impl Rule for AbsoluteModulePathsRule {
         Self::static_info()
     }
 
-    fn run(&self, ws: &Workspace, _config: &Config, out: &mut dyn Emitter) {
-        let severity = self.cfg.level.to_severity();
+    fn run(&self, ws: &Workspace, ctx: &RuleContext<'_>, out: &mut dyn Emitter) {
         for file in &ws.files {
+            let cfg = match ctx
+                .policy
+                .decode_rule::<AbsoluteModulePathsConfig>(Self::static_info().id, Some(&file.path))
+            {
+                Ok(cfg) => cfg,
+                Err(_) => continue,
+            };
             let Some(ast) = &file.ast else { continue };
             let mut v = Visitor {
                 file_path: &file.path,
                 file_text: &file.text,
-                allow_prefixes: &self.cfg.allow_prefixes,
-                roots: &self.cfg.roots,
-                allow_crate_root_macros: self.cfg.allow_crate_root_macros,
-                allow_crate_root_consts: self.cfg.allow_crate_root_consts,
-                allow_crate_root_fn_calls: self.cfg.allow_crate_root_fn_calls,
-                severity,
+                allow_prefixes: &cfg.allow_prefixes,
+                roots: &cfg.roots,
+                allow_crate_root_macros: cfg.allow_crate_root_macros,
+                allow_crate_root_consts: cfg.allow_crate_root_consts,
+                allow_crate_root_fn_calls: cfg.allow_crate_root_fn_calls,
+                severity: cfg.level.to_severity(),
                 out,
             };
             v.visit_file(ast);
@@ -79,6 +85,8 @@ impl Visitor<'_> {
         let fixes = Vec::new();
         self.out.emit(Finding {
             rule_id: AbsoluteModulePathsRule::static_info().id.to_string(),
+            family: Some(AbsoluteModulePathsRule::static_info().family),
+            engine: Some(AbsoluteModulePathsRule::static_info().backend),
             severity: self.severity,
             message: format!("qualified module path: {path_str}"),
             primary: Some(Span::from_pm_span(self.file_path, span)),
@@ -88,6 +96,8 @@ impl Visitor<'_> {
                     .to_string(),
             ),
             evidence: None,
+            confidence: None,
+            tags: vec!["imports".to_string(), "style".to_string()],
             fixes,
         });
     }
@@ -101,6 +111,8 @@ impl Visitor<'_> {
             let fixes = self.build_fixes(span, path);
             self.out.emit(Finding {
                 rule_id: AbsoluteModulePathsRule::static_info().id.to_string(),
+                family: Some(AbsoluteModulePathsRule::static_info().family),
+                engine: Some(AbsoluteModulePathsRule::static_info().backend),
                 severity: self.severity,
                 message: format!("qualified module path: {path_str}"),
                 primary: Some(Span::from_pm_span(self.file_path, span)),
@@ -110,6 +122,8 @@ impl Visitor<'_> {
                         .to_string(),
                 ),
                 evidence: None,
+                confidence: None,
+                tags: vec!["imports".to_string(), "style".to_string()],
                 fixes,
             });
         }
@@ -120,9 +134,7 @@ impl Visitor<'_> {
             return Vec::new();
         }
 
-        let (import_path, replacement, imported_name) =
-            match compute_import_and_replacement(path)
-        {
+        let (import_path, replacement, imported_name) = match compute_import_and_replacement(path) {
             Some(v) => v,
             None => return Vec::new(),
         };
@@ -339,7 +351,9 @@ fn two_segment_crate_root_ident(path_str: &str) -> Option<String> {
 
 fn is_screaming_snake(ident: &str) -> bool {
     let mut chars = ident.chars();
-    let Some(first) = chars.next() else { return false };
+    let Some(first) = chars.next() else {
+        return false;
+    };
     if !first.is_ascii_uppercase() {
         return false;
     }
@@ -412,9 +426,11 @@ fn compute_import_and_replacement(path: &syn::Path) -> Option<(String, String, O
 
 fn name_conflicts(file_text: &str, name: Option<&str>) -> bool {
     let Some(name) = name else { return false };
-    let Ok(ast) = syn::parse_file(file_text) else { return false };
+    let Ok(ast) = syn::parse_file(file_text) else {
+        return false;
+    };
 
-        let mut taken: HashSet<String> = HashSet::new();
+    let mut taken: HashSet<String> = HashSet::new();
     for item in ast.items {
         match item {
             syn::Item::Const(i) => {

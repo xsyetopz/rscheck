@@ -1,25 +1,25 @@
 use crate::analysis::Workspace;
-use crate::config::{ComplexityMode, Config, FileComplexityConfig};
+use crate::config::{ComplexityMode, FileComplexityConfig};
 use crate::emit::Emitter;
 use crate::report::{FileMetrics, Finding};
-use crate::rules::{Rule, RuleInfo};
+use crate::rules::{Rule, RuleBackend, RuleContext, RuleFamily, RuleInfo};
 use crate::span::{Location, Span};
 use std::path::Path;
 use syn::visit::Visit;
 
-pub struct FileComplexityRule {
-    cfg: FileComplexityConfig,
-}
+pub struct FileComplexityRule;
 
 impl FileComplexityRule {
-    pub fn new(cfg: FileComplexityConfig) -> Self {
-        Self { cfg }
-    }
-
     pub fn static_info() -> RuleInfo {
         RuleInfo {
-            id: "rscheck::file_complexity",
+            id: "shape.file_complexity",
+            family: RuleFamily::Shape,
+            backend: RuleBackend::Syntax,
             summary: "Computes per-file complexity metrics (cyclomatic by default) and enforces thresholds.",
+            default_level: FileComplexityConfig::default().level,
+            schema: "level, mode, max_file, max_fn, count_question, match_arms",
+            config_example: "[rules.\"shape.file_complexity\"]\nlevel = \"warn\"\nmode = \"cyclomatic\"\nmax_file = 200\nmax_fn = 25",
+            fixable: false,
         }
     }
 }
@@ -29,17 +29,22 @@ impl Rule for FileComplexityRule {
         Self::static_info()
     }
 
-    fn run(&self, ws: &Workspace, _config: &Config, out: &mut dyn Emitter) {
-        let severity = self.cfg.level.to_severity();
-
+    fn run(&self, ws: &Workspace, ctx: &RuleContext<'_>, out: &mut dyn Emitter) {
         for file in &ws.files {
+            let cfg = match ctx
+                .policy
+                .decode_rule::<FileComplexityConfig>(Self::static_info().id, Some(&file.path))
+            {
+                Ok(cfg) => cfg,
+                Err(_) => continue,
+            };
             let Some(ast) = &file.ast else { continue };
 
-            match self.cfg.mode {
+            match cfg.mode {
                 ComplexityMode::Cyclomatic => {
                     let mut v = CyclomaticVisitor {
-                        count_question: self.cfg.count_question,
-                        match_arms: self.cfg.match_arms,
+                        count_question: cfg.count_question,
+                        match_arms: cfg.match_arms,
                         per_fn: Vec::new(),
                     };
                     v.visit_file(ast);
@@ -53,25 +58,27 @@ impl Rule for FileComplexityRule {
                         cyclomatic_max_fn: max_fn,
                     });
 
-                    let over_file = sum > self.cfg.max_file;
-                    let over_fn = max_fn > self.cfg.max_fn;
+                    let over_file = sum > cfg.max_file;
+                    let over_fn = max_fn > cfg.max_fn;
                     if over_file || over_fn {
                         let mut msg = String::new();
                         if over_file {
                             msg.push_str(&format!(
                                 "file cyclomatic complexity sum {sum} exceeds {}\n",
-                                self.cfg.max_file
+                                cfg.max_file
                             ));
                         }
                         if over_fn {
                             msg.push_str(&format!(
                                 "max function cyclomatic complexity {max_fn} exceeds {}\n",
-                                self.cfg.max_fn
+                                cfg.max_fn
                             ));
                         }
                         out.emit(Finding {
                             rule_id: Self::static_info().id.to_string(),
-                            severity,
+                            family: Some(Self::static_info().family),
+                            engine: Some(Self::static_info().backend),
+                            severity: cfg.level.to_severity(),
                             message: msg.trim_end().to_string(),
                             primary: Some(file_span(&file.path)),
                             secondary: Vec::new(),
@@ -80,24 +87,27 @@ impl Rule for FileComplexityRule {
                                     .to_string(),
                             ),
                             evidence: Some(format_per_fn(&v.per_fn)),
+                            confidence: None,
+                            tags: vec!["complexity".to_string()],
                             fixes: Vec::new(),
                         });
                     }
                 }
                 ComplexityMode::PhysicalLoc => {
                     let loc = count_physical_loc(&file.text);
-                    if loc as u32 > self.cfg.max_file {
+                    if loc as u32 > cfg.max_file {
                         out.emit(Finding {
                             rule_id: Self::static_info().id.to_string(),
-                            severity,
-                            message: format!(
-                                "file physical LOC {loc} exceeds {}",
-                                self.cfg.max_file
-                            ),
+                            family: Some(Self::static_info().family),
+                            engine: Some(Self::static_info().backend),
+                            severity: cfg.level.to_severity(),
+                            message: format!("file physical LOC {loc} exceeds {}", cfg.max_file),
                             primary: Some(file_span(&file.path)),
                             secondary: Vec::new(),
                             help: Some("Refactor: split file into smaller modules.".to_string()),
                             evidence: None,
+                            confidence: None,
+                            tags: vec!["size".to_string()],
                             fixes: Vec::new(),
                         });
                     }
@@ -106,15 +116,19 @@ impl Rule for FileComplexityRule {
                     let mut v = LogicalLocVisitor { stmts: 0 };
                     v.visit_file(ast);
                     let ll = v.stmts;
-                    if ll > self.cfg.max_file {
+                    if ll > cfg.max_file {
                         out.emit(Finding {
                             rule_id: Self::static_info().id.to_string(),
-                            severity,
-                            message: format!("file logical LOC {ll} exceeds {}", self.cfg.max_file),
+                            family: Some(Self::static_info().family),
+                            engine: Some(Self::static_info().backend),
+                            severity: cfg.level.to_severity(),
+                            message: format!("file logical LOC {ll} exceeds {}", cfg.max_file),
                             primary: Some(file_span(&file.path)),
                             secondary: Vec::new(),
                             help: Some("Refactor: split file into smaller modules.".to_string()),
                             evidence: None,
+                            confidence: None,
+                            tags: vec!["size".to_string()],
                             fixes: Vec::new(),
                         });
                     }

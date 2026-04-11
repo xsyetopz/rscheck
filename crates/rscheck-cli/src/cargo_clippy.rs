@@ -1,5 +1,6 @@
 use cargo_metadata::{Message, diagnostic::DiagnosticLevel};
-use rscheck::report::{Fix, FixSafety, Finding, Severity, TextEdit};
+use rscheck::report::{Finding, Fix, FixSafety, Severity, TextEdit};
+use rscheck::rules::RuleBackend;
 use rscheck::span::{Location, Span};
 use std::io::{self, BufReader};
 use std::path::PathBuf;
@@ -85,7 +86,9 @@ fn diagnostic_to_finding(diag: &cargo_metadata::diagnostic::Diagnostic) -> Optio
 
     let mut fixes = Vec::new();
     for (idx, span) in diag.spans.iter().enumerate() {
-        let Some(repl) = &span.suggested_replacement else { continue };
+        let Some(repl) = &span.suggested_replacement else {
+            continue;
+        };
         let safety = match span.suggestion_applicability {
             Some(cargo_metadata::diagnostic::Applicability::MachineApplicable) => FixSafety::Safe,
             _ => FixSafety::Unsafe,
@@ -96,7 +99,10 @@ fn diagnostic_to_finding(diag: &cargo_metadata::diagnostic::Diagnostic) -> Optio
                 diag.code.as_ref().map_or("clippy", |c| c.code.as_str())
             ),
             safety,
-            message: span.label.clone().unwrap_or_else(|| "apply suggestion".to_string()),
+            message: span
+                .label
+                .clone()
+                .unwrap_or_else(|| "apply suggestion".to_string()),
             edits: vec![TextEdit {
                 file: span.file_name.clone(),
                 byte_start: span.byte_start,
@@ -111,12 +117,16 @@ fn diagnostic_to_finding(diag: &cargo_metadata::diagnostic::Diagnostic) -> Optio
             .code
             .as_ref()
             .map_or_else(|| "clippy".to_string(), |c| c.code.clone()),
+        family: None,
+        engine: Some(RuleBackend::Adapter),
         severity,
         message: diag.message.clone(),
         primary,
         secondary: Vec::new(),
         help: None,
         evidence: None,
+        confidence: None,
+        tags: vec!["clippy".to_string()],
         fixes,
     })
 }

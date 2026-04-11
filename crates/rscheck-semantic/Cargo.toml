@@ -1,0 +1,19 @@
+[package]
+name = "rscheck-semantic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme.workspace = true
+
+description = "Semantic backend surface for rscheck."
+
+[features]
+default = []
+nightly = []
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }

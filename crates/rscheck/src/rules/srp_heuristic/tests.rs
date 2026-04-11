@@ -1,8 +1,8 @@
 use super::SrpHeuristicRule;
 use crate::analysis::{SourceFile, Workspace};
-use crate::config::{Config, Level, SrpHeuristicConfig};
+use crate::config::{Level, Policy, RuleSettings};
 use crate::emit::ReportEmitter;
-use crate::rules::Rule;
+use crate::rules::{Rule, RuleContext};
 use std::path::PathBuf;
 
 fn ws_with_single_file(code: &str) -> Workspace {
@@ -33,13 +33,18 @@ impl S {
 "#,
     );
 
-    let cfg = Config::default();
+    let mut cfg = Policy::default();
+    cfg.rules.insert(
+        "shape.responsibility_split".to_string(),
+        RuleSettings {
+            level: Some(Level::Warn),
+            options: toml::toml! {
+                method_count_threshold = 2
+            },
+        },
+    );
     let mut emitter = ReportEmitter::new();
-    SrpHeuristicRule::new(SrpHeuristicConfig {
-        level: Level::Warn,
-        method_count_threshold: 2,
-    })
-    .run(&ws, &cfg, &mut emitter);
+    SrpHeuristicRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
 
     assert_eq!(emitter.findings.len(), 1);
 }

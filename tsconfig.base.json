@@ -1,0 +1,58 @@
+{
+    "compilerOptions": {
+        "allowArbitraryExtensions": true,
+        "allowImportingTsExtensions": true,
+        "allowSyntheticDefaultImports": true,
+        "allowUmdGlobalAccess": true,
+        "allowUnreachableCode": false,
+        "allowUnusedLabels": false,
+        "checkJs": false,
+        "composite": true,
+        "declaration": true,
+        "declarationMap": true,
+        "esModuleInterop": true,
+        "exactOptionalPropertyTypes": true,
+        "forceConsistentCasingInFileNames": true,
+        "isolatedModules": true,
+        "jsx": "react-jsx",
+        "lib": [
+            "ES2022",
+            "DOM",
+            "DOM.Iterable"
+        ],
+        "module": "ESNext",
+        "moduleDetection": "force",
+        "moduleResolution": "bundler",
+        "noEmit": true,
+        "noFallthroughCasesInSwitch": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noPropertyAccessFromIndexSignature": true,
+        "noUncheckedIndexedAccess": false,
+        "noUncheckedSideEffectImports": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "paths": {
+            "@/*": [
+                "./site/src/*"
+            ]
+        },
+        "resolveJsonModule": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "target": "ES2022",
+        "types": [
+            "bun-types",
+            "vite/client"
+        ],
+        "useDefineForClassFields": true
+    },
+    "include": [
+        "site/src",
+        "site/vite.config.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
+}

@@ -12,7 +12,10 @@ pub enum ApplyError {
     #[error("failed to write file: {path}")]
     Write { path: String, source: io::Error },
     #[error("failed to apply edits for file: {path}")]
-    Apply { path: String, source: rscheck::fix::FixError },
+    Apply {
+        path: String,
+        source: rscheck::fix::FixError,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -141,7 +144,10 @@ pub fn print_dry_run(planned: &PlannedEdits) -> Result<bool, ApplyError> {
         would_change = true;
         let diff = TextDiff::from_lines(&old, &new)
             .unified_diff()
-            .header(&format!("a/{}", display_path(file)), &format!("b/{}", display_path(file)))
+            .header(
+                &format!("a/{}", display_path(file)),
+                &format!("b/{}", display_path(file)),
+            )
             .to_string();
         print!("{diff}");
     }

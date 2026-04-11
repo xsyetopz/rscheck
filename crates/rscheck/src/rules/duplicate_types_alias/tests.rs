@@ -1,8 +1,8 @@
 use super::DuplicateTypesAliasCandidateRule;
 use crate::analysis::{SourceFile, Workspace};
-use crate::config::{Config, DuplicateTypesAliasConfig, Level};
+use crate::config::{Level, Policy, RuleSettings};
 use crate::emit::ReportEmitter;
-use crate::rules::Rule;
+use crate::rules::{Rule, RuleContext};
 use std::path::PathBuf;
 
 fn ws_with_single_file(code: &str) -> Workspace {
@@ -37,15 +37,20 @@ fn f(
 "#,
     );
 
-    let cfg = Config::default();
+    let mut cfg = Policy::default();
+    cfg.rules.insert(
+        "design.repeated_type_aliases".to_string(),
+        RuleSettings {
+            level: Some(Level::Warn),
+            options: toml::toml! {
+                min_occurrences = 3
+                min_len = 10
+                exclude_outer = ["Option"]
+            },
+        },
+    );
     let mut emitter = ReportEmitter::new();
-    DuplicateTypesAliasCandidateRule::new(DuplicateTypesAliasConfig {
-        level: Level::Warn,
-        min_occurrences: 3,
-        min_len: 10,
-        exclude_outer: vec!["Option".to_string()],
-    })
-    .run(&ws, &cfg, &mut emitter);
+    DuplicateTypesAliasCandidateRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
 
     assert_eq!(emitter.findings.len(), 1);
     assert!(emitter.findings[0].message.contains("type alias"));

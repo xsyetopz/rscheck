@@ -6,14 +6,13 @@ mod report_sarif;
 
 use cargo_clippy::run_clippy;
 use clap::Parser;
-use config_file::{
-    FileConfig, OutputFormat, default_config_path, workspace_root, write_default_config,
-};
+use config_file::{default_config_path, load_from, workspace_root, write_default_config};
+use fix_apply::{apply_planned_edits, plan_edits, print_dry_run};
 use rscheck::analysis::Workspace;
+use rscheck::config::{OutputFormat, Policy};
 use rscheck::report::{FixSafety, Report};
 use rscheck::rules;
 use rscheck::runner::Runner;
-use fix_apply::{apply_planned_edits, plan_edits, print_dry_run};
 use std::path::PathBuf;
 use std::process::ExitCode as ProcessExitCode;
 use std::{fs, io};
@@ -59,14 +58,11 @@ pub struct CommonOutputArgs {
 
     #[arg(long)]
     pub output: Option<PathBuf>,
-
-    #[arg(long)]
-    pub with_clippy: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum FormatArg {
-    Human,
+    Text,
     Json,
     Sarif,
     Html,
@@ -75,7 +71,7 @@ pub enum FormatArg {
 impl From<FormatArg> for OutputFormat {
     fn from(value: FormatArg) -> Self {
         match value {
-            FormatArg::Human => OutputFormat::Human,
+            FormatArg::Text => OutputFormat::Text,
             FormatArg::Json => OutputFormat::Json,
             FormatArg::Sarif => OutputFormat::Sarif,
             FormatArg::Html => OutputFormat::Html,
@@ -131,18 +127,28 @@ fn init_tracing() {
 }
 
 fn run_list_rules() -> ExitCode {
-    for info in rules::all_rule_infos() {
-        println!("{}\t{}", info.id, info.summary);
+    for info in rules::rule_catalog() {
+        println!(
+            "{}\t{:?}\t{:?}\t{:?}\t{}",
+            info.id, info.family, info.backend, info.default_level, info.summary
+        );
     }
     ExitCode::from(0)
 }
 
 fn run_explain(rule_id: &str) -> ExitCode {
-    let infos = rules::all_rule_infos();
-    let info = infos.into_iter().find(|i| i.id == rule_id);
+    let info = rules::rule_catalog().into_iter().find(|i| i.id == rule_id);
     match info {
         Some(info) => {
-            println!("{}\n\n{}", info.id, info.summary);
+            println!(
+                "{}\n\nfamily: {:?}\nbackend: {:?}\ndefault: {:?}\nschema: {}\n\n{}\n",
+                info.id,
+                info.family,
+                info.backend,
+                info.default_level,
+                info.schema,
+                info.config_example
+            );
             ExitCode::from(0)
         }
         None => {
@@ -194,8 +200,8 @@ fn run_check(args: CheckArgs) -> ExitCode {
         .out
         .config
         .unwrap_or_else(|| default_config_path(&root));
-    let mut file_config = if config_path.exists() {
-        match FileConfig::load_from(&config_path) {
+    let mut policy = if config_path.exists() {
+        match load_from(&config_path) {
             Ok(cfg) => cfg,
             Err(err) => {
                 eprintln!("{err}");
@@ -203,17 +209,14 @@ fn run_check(args: CheckArgs) -> ExitCode {
             }
         }
     } else {
-        FileConfig::default()
+        Policy::default_with_rules(rules::default_rule_settings())
     };
 
     if let Some(format) = args.out.format {
-        file_config.output.format = format.into();
+        policy.output.format = format.into();
     }
     if let Some(output) = args.out.output {
-        file_config.output.output = Some(output);
-    }
-    if let Some(with_clippy) = args.out.with_clippy {
-        file_config.output.with_clippy = with_clippy;
+        policy.output.output = Some(output);
     }
 
     let wants_fix = args.write || args.dry_run;
@@ -226,8 +229,7 @@ fn run_check(args: CheckArgs) -> ExitCode {
     };
 
     for iter in 0..iterations {
-        let mut report = Report::default();
-        let ws = match Workspace::new(root.clone()).load_files(&file_config.core) {
+        let ws = match Workspace::new(root.clone()).load_files(&policy) {
             Ok(ws) => ws,
             Err(err) => {
                 eprintln!("{err}");
@@ -235,11 +237,22 @@ fn run_check(args: CheckArgs) -> ExitCode {
             }
         };
 
-        if args.rscheck {
-            report = Runner::run(&ws, &file_config.core);
-        }
-        if file_config.output.with_clippy {
-            match run_clippy(&ws.root, &args.cargo_args) {
+        let mut report = if args.rscheck {
+            match Runner::run(&ws, &policy) {
+                Ok(report) => report,
+                Err(err) => {
+                    eprintln!("{err}");
+                    return ExitCode::from(2);
+                }
+            }
+        } else {
+            Report::default()
+        };
+
+        if policy.adapters.clippy.enabled {
+            let mut clippy_args = policy.adapters.clippy.args.clone();
+            clippy_args.extend(args.cargo_args.clone());
+            match run_clippy(&ws.root, &clippy_args) {
                 Ok(mut findings) => report.findings.append(&mut findings),
                 Err(err) => {
                     eprintln!("{err}");
@@ -253,7 +266,7 @@ fn run_check(args: CheckArgs) -> ExitCode {
         if args.dry_run {
             match print_dry_run(&planned) {
                 Ok(would_change) => {
-                    if let Err(err) = write_report(&report, &file_config) {
+                    if let Err(err) = write_report(&report, &policy) {
                         eprintln!("{err}");
                         return ExitCode::from(2);
                     }
@@ -284,7 +297,6 @@ fn run_check(args: CheckArgs) -> ExitCode {
                 }
             }
 
-            // If we applied edits, keep looping to reach a fixed point.
             last_report = report;
             if iter + 1 == iterations {
                 break;
@@ -292,15 +304,14 @@ fn run_check(args: CheckArgs) -> ExitCode {
             continue;
         }
 
-        // No fixing requested: just emit output once.
-        if let Err(err) = write_report(&report, &file_config) {
+        if let Err(err) = write_report(&report, &policy) {
             eprintln!("{err}");
             return ExitCode::from(2);
         }
         return ExitCode::from(report.worst_severity().exit_code());
     }
 
-    if let Err(err) = write_report(&last_report, &file_config) {
+    if let Err(err) = write_report(&last_report, &policy) {
         eprintln!("{err}");
         return ExitCode::from(2);
     }
@@ -316,9 +327,9 @@ pub enum OutputError {
     Write(#[source] io::Error),
 }
 
-fn write_report(report: &Report, config: &FileConfig) -> Result<(), OutputError> {
-    let text = match config.output.format {
-        OutputFormat::Human => human_report(report),
+fn write_report(report: &Report, policy: &Policy) -> Result<(), OutputError> {
+    let text = match policy.output.format {
+        OutputFormat::Text => text_report(report),
         OutputFormat::Json => {
             serde_json::to_string_pretty(report).map_err(OutputError::Serialize)?
         }
@@ -327,7 +338,7 @@ fn write_report(report: &Report, config: &FileConfig) -> Result<(), OutputError>
         OutputFormat::Html => report_html::to_html(report),
     };
 
-    match &config.output.output {
+    match &policy.output.output {
         Some(path) => fs::write(path, text).map_err(OutputError::Write),
         None => {
             print!("{text}");
@@ -336,7 +347,7 @@ fn write_report(report: &Report, config: &FileConfig) -> Result<(), OutputError>
     }
 }
 
-fn human_report(report: &Report) -> String {
+fn text_report(report: &Report) -> String {
     let mut out = String::new();
     for f in &report.findings {
         let fixable = f.fixes.iter().any(|fx| fx.safety == FixSafety::Safe);
@@ -362,6 +373,12 @@ fn human_report(report: &Report) -> String {
                     if fixable { " (fixable)" } else { "" }
                 ));
             }
+        }
+    }
+    if !report.summary.skipped_rules.is_empty() {
+        out.push_str("\nskipped semantic rules:\n");
+        for rule in &report.summary.skipped_rules {
+            out.push_str(&format!("- {rule}\n"));
         }
     }
     out

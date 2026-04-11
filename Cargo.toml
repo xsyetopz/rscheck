@@ -4,16 +4,16 @@ resolver = "2"
 
 # https://doc.rust-lang.org/cargo/reference/manifest.html
 [workspace.package]
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 edition = "2024"
 rust-version = "1.87.0"
-description = ""
+description = "Policy-driven static analysis for Rust workspaces."
 readme = "README.md"
-homepage = "<TODO>"
+homepage = "https://xsyetopz.github.io/rscheck/"
 repository = "https://github.com/xsyetopz/rscheck"
 license = "MIT OR Apache-2.0"
-keywords = [""]
-categories = [""]
+keywords = ["rust", "static-analysis", "lint", "policy", "clippy"]
+categories = ["development-tools", "development-tools::testing"]
 publish = false
 
 [workspace.dependencies]

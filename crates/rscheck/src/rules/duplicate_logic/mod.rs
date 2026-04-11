@@ -1,29 +1,29 @@
 use crate::analysis::Workspace;
-use crate::config::{Config, DuplicateLogicConfig};
+use crate::config::DuplicateLogicConfig;
 use crate::emit::Emitter;
 use crate::report::Finding;
-use crate::rules::{Rule, RuleInfo};
+use crate::rules::{Rule, RuleBackend, RuleContext, RuleFamily, RuleInfo};
 use crate::span::Span;
 use quote::ToTokens;
 use similar::TextDiff;
-use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use syn::spanned::Spanned;
 
-pub struct DuplicateLogicRule {
-    cfg: DuplicateLogicConfig,
-}
+pub struct DuplicateLogicRule;
 
 impl DuplicateLogicRule {
-    pub fn new(cfg: DuplicateLogicConfig) -> Self {
-        Self { cfg }
-    }
-
     pub fn static_info() -> RuleInfo {
         RuleInfo {
-            id: "rscheck::duplicate_logic",
+            id: "shape.duplicate_logic",
+            family: RuleFamily::Shape,
+            backend: RuleBackend::Syntax,
             summary: "Finds duplicated logic between function bodies using token fingerprint similarity.",
+            default_level: DuplicateLogicConfig::default().level,
+            schema: "level, min_tokens, threshold, max_results, exclude_globs, kgram",
+            config_example: "[rules.\"shape.duplicate_logic\"]\nlevel = \"warn\"\nmin_tokens = 80\nthreshold = 0.8",
+            fixable: false,
         }
     }
 }
@@ -33,9 +33,16 @@ impl Rule for DuplicateLogicRule {
         Self::static_info()
     }
 
-    fn run(&self, ws: &Workspace, _config: &Config, out: &mut dyn Emitter) {
-        let severity = self.cfg.level.to_severity();
-        let exclude = build_exclude(&self.cfg.exclude_globs);
+    fn run(&self, ws: &Workspace, ctx: &RuleContext<'_>, out: &mut dyn Emitter) {
+        let cfg = match ctx
+            .policy
+            .decode_rule::<DuplicateLogicConfig>(Self::static_info().id, None)
+        {
+            Ok(cfg) => cfg,
+            Err(_) => return,
+        };
+        let severity = cfg.level.to_severity();
+        let exclude = build_exclude(&cfg.exclude_globs);
 
         let mut functions = Vec::new();
         for file in &ws.files {
@@ -48,7 +55,7 @@ impl Rule for DuplicateLogicRule {
 
         let mut fingerprints: Vec<HashSet<u64>> = Vec::with_capacity(functions.len());
         for f in &functions {
-            let set = fingerprint(&f.norm_tokens, self.cfg.kgram);
+            let set = fingerprint(&f.norm_tokens, cfg.kgram);
             fingerprints.push(set);
         }
 
@@ -78,9 +85,7 @@ impl Rule for DuplicateLogicRule {
         for ((i, j), _shared) in shared {
             let a = &functions[i];
             let b = &functions[j];
-            if a.norm_tokens.len() < self.cfg.min_tokens
-                || b.norm_tokens.len() < self.cfg.min_tokens
-            {
+            if a.norm_tokens.len() < cfg.min_tokens || b.norm_tokens.len() < cfg.min_tokens {
                 continue;
             }
             let sa = &fingerprints[i];
@@ -91,13 +96,13 @@ impl Rule for DuplicateLogicRule {
             let inter = sa.intersection(sb).count() as f32;
             let union = (sa.len() + sb.len()) as f32 - inter;
             let sim = if union <= 0.0 { 0.0 } else { inter / union };
-            if sim >= self.cfg.threshold {
+            if sim >= cfg.threshold {
                 matches.push((sim, i, j));
             }
         }
 
         matches.sort_by(|a, b| b.0.total_cmp(&a.0));
-        matches.truncate(self.cfg.max_results);
+        matches.truncate(cfg.max_results);
 
         for (sim, i, j) in matches {
             let a = &functions[i];
@@ -105,6 +110,8 @@ impl Rule for DuplicateLogicRule {
             let evidence = side_by_side(&a.source, &b.source);
             out.emit(Finding {
                 rule_id: Self::static_info().id.to_string(),
+                family: Some(Self::static_info().family),
+                engine: Some(Self::static_info().backend),
                 severity,
                 message: format!(
                     "duplicate logic: {:.0}% similarity between `{}` and `{}`",
@@ -118,6 +125,8 @@ impl Rule for DuplicateLogicRule {
                     "Extract a shared helper or refactor to remove duplication.".to_string(),
                 ),
                 evidence: Some(evidence),
+                confidence: None,
+                tags: vec!["duplication".to_string()],
                 fixes: Vec::new(),
             });
         }

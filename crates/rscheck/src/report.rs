@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::config::Level;
+use crate::rules::{RuleBackend, RuleFamily};
 use crate::span::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,6 +50,10 @@ pub struct Fix {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub rule_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub family: Option<RuleFamily>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine: Option<RuleBackend>,
     pub severity: Severity,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,8 +64,41 @@ pub struct Finding {
     pub help: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fixes: Vec<Fix>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleCatalogEntry {
+    pub id: String,
+    pub family: RuleFamily,
+    pub backend: RuleBackend,
+    pub default_level: Level,
+    pub summary: String,
+    #[serde(default)]
+    pub fixable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdapterRun {
+    pub name: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RunSummary {
+    #[serde(default)]
+    pub engine_used: Vec<RuleBackend>,
+    #[serde(default)]
+    pub semantic_backend_available: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_rules: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adapter_runs: Vec<AdapterRun>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -83,6 +122,10 @@ pub struct Report {
     pub findings: Vec<Finding>,
     #[serde(default)]
     pub metrics: Metrics,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rule_catalog: Vec<RuleCatalogEntry>,
+    #[serde(default)]
+    pub summary: RunSummary,
 }
 
 impl Report {

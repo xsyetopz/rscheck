@@ -55,7 +55,11 @@ pub fn line_col_to_byte_offset(text: &str, line_1: u32, col_1: u32) -> Result<us
 pub fn apply_text_edits(text: &str, edits: &[TextEdit]) -> Result<String, FixError> {
     let mut out = text.to_string();
     let mut ordered = edits.to_vec();
-    ordered.sort_by(|a, b| b.byte_start.cmp(&a.byte_start).then(b.byte_end.cmp(&a.byte_end)));
+    ordered.sort_by(|a, b| {
+        b.byte_start
+            .cmp(&a.byte_start)
+            .then(b.byte_end.cmp(&a.byte_end))
+    });
 
     let mut last_start: Option<u32> = None;
     for e in &ordered {
@@ -97,4 +101,3 @@ pub fn find_use_insertion_offset(text: &str) -> usize {
     }
     offset
 }
-

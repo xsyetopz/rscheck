@@ -1,24 +1,24 @@
 use crate::analysis::Workspace;
-use crate::config::{Config, SrpHeuristicConfig};
+use crate::config::SrpHeuristicConfig;
 use crate::emit::Emitter;
 use crate::report::Finding;
-use crate::rules::{Rule, RuleInfo};
+use crate::rules::{Rule, RuleBackend, RuleContext, RuleFamily, RuleInfo};
 use crate::span::Span;
 use syn::spanned::Spanned;
 
-pub struct SrpHeuristicRule {
-    cfg: SrpHeuristicConfig,
-}
+pub struct SrpHeuristicRule;
 
 impl SrpHeuristicRule {
-    pub fn new(cfg: SrpHeuristicConfig) -> Self {
-        Self { cfg }
-    }
-
     pub fn static_info() -> RuleInfo {
         RuleInfo {
-            id: "rscheck::srp_heuristic",
-            summary: "Experimental SRP heuristic: flags impl blocks with many methods (off by default).",
+            id: "shape.responsibility_split",
+            family: RuleFamily::Shape,
+            backend: RuleBackend::Syntax,
+            summary: "Flags impl blocks with many methods as a responsibility-split heuristic.",
+            default_level: SrpHeuristicConfig::default().level,
+            schema: "level, method_count_threshold",
+            config_example: "[rules.\"shape.responsibility_split\"]\nlevel = \"warn\"\nmethod_count_threshold = 25",
+            fixable: false,
         }
     }
 }
@@ -28,9 +28,15 @@ impl Rule for SrpHeuristicRule {
         Self::static_info()
     }
 
-    fn run(&self, ws: &Workspace, _config: &Config, out: &mut dyn Emitter) {
-        let severity = self.cfg.level.to_severity();
+    fn run(&self, ws: &Workspace, ctx: &RuleContext<'_>, out: &mut dyn Emitter) {
         for file in &ws.files {
+            let cfg = match ctx
+                .policy
+                .decode_rule::<SrpHeuristicConfig>(Self::static_info().id, Some(&file.path))
+            {
+                Ok(cfg) => cfg,
+                Err(_) => continue,
+            };
             let Some(ast) = &file.ast else { continue };
             for item in &ast.items {
                 let syn::Item::Impl(imp) = item else { continue };
@@ -39,12 +45,14 @@ impl Rule for SrpHeuristicRule {
                     .iter()
                     .filter(|i| matches!(i, syn::ImplItem::Fn(_)))
                     .count();
-                if methods <= self.cfg.method_count_threshold {
+                if methods <= cfg.method_count_threshold {
                     continue;
                 }
                 out.emit(Finding {
                     rule_id: Self::static_info().id.to_string(),
-                    severity,
+                    family: Some(Self::static_info().family),
+                    engine: Some(Self::static_info().backend),
+                    severity: cfg.level.to_severity(),
                     message: format!(
                         "impl block has {methods} methods; consider splitting responsibilities"
                     ),
@@ -55,6 +63,8 @@ impl Rule for SrpHeuristicRule {
                             .to_string(),
                     ),
                     evidence: None,
+                    confidence: None,
+                    tags: vec!["design".to_string()],
                     fixes: Vec::new(),
                 });
             }

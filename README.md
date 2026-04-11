@@ -1,32 +1,32 @@
 # rscheck
 
-`rscheck` is a static analysis tool for Rust workspaces, inspired by cppcheck.
+`rscheck` is a policy-driven static analysis tool for Rust workspaces.
 
-It is designed to catch highly configurable issues that are out of scope for Clippy
-and to provide a library API so it can be embedded in other tools.
+It is built for checks that sit above compiler errors and default Clippy linting:
+architecture boundaries, API contracts, duplication thresholds, scoped rule
+overrides, and repo-specific design constraints.
 
-## Install (from Git)
+Site: <https://xsyetopz.github.io/rscheck/>
 
-This repo is not published on crates.io. Install the CLI directly from Git:
+## Install
+
+This repo is not published on crates.io.
 
 ```bash
 cargo install --git https://github.com/xsyetopz/rscheck --locked rscheck-cli
 ```
 
 That installs:
-- `rscheck` (the CLI)
-- `cargo-rscheck` (so you can also run `cargo rscheck`)
+- `rscheck`
+- `cargo-rscheck`
 
-## Use in a repository
+## Check A Workspace
 
-Initialize a local config (optional but recommended):
+Initialize a policy file:
 
 ```bash
 rscheck init
 ```
-
-This writes `.rscheck.toml` at the workspace root (defaults are used if the file
-does not exist).
 
 Run checks:
 
@@ -34,34 +34,16 @@ Run checks:
 rscheck check
 ```
 
-By default `rscheck` also runs `cargo clippy --workspace` and merges its
-diagnostics into the same report. Disable Clippy if you want only `rscheck` rules:
+Choose a report format:
 
 ```bash
-rscheck check --with-clippy=false
-```
-
-Pass extra arguments to Clippy/Cargo after `--`:
-
-```bash
-rscheck check -- --all-targets --all-features
-```
-
-### Output formats
-
-```bash
-rscheck check --format human
+rscheck check --format text
 rscheck check --format json
 rscheck check --format sarif --output rscheck.sarif.json
 rscheck check --format html --output rscheck.html
 ```
 
-### Applying fixes (Biome-style)
-
-`rscheck` can apply edits suggested by its own rules and by Clippy (when Clippy
-emits machine-applicable replacements).
-
-Preview changes as diffs:
+Preview edits:
 
 ```bash
 rscheck check --dry-run
@@ -73,59 +55,125 @@ Apply safe fixes:
 rscheck check --write
 ```
 
-Apply safe + unsafe fixes:
+Apply safe and unsafe fixes:
 
 ```bash
 rscheck check --write --unsafe
 ```
 
+Pass extra cargo/clippy arguments after `--`:
+
+```bash
+rscheck check -- --all-targets --all-features
+```
+
+Inspect rule metadata:
+
+```bash
+rscheck list-rules
+rscheck explain shape.file_complexity
+```
+
 ## Configuration
 
-`rscheck` reads `.rscheck.toml` (created by `rscheck init`). Example:
+`rscheck` reads `.rscheck.toml` from the workspace root. The v2 config is
+policy-first: engine mode, adapters, rule IDs in dot form, and path-scoped
+overrides.
 
 ```toml
+version = 2
+
+[engine]
+semantic = "auto"
+
+[workspace]
+include = ["**/*.rs"]
+exclude = ["target/**", ".git/**"]
+
 [output]
-format = "human" # or: "json" | "sarif" | "html"
-with_clippy = true
+format = "text"
 # output = "path/to/report.txt"
 
-[rules.absolute_module_paths]
+[adapters.clippy]
+enabled = true
+args = []
+
+[rules."architecture.qualified_module_paths"]
 level = "deny"
-allow_prefixes = []
 roots = ["std", "core", "alloc", "crate"]
 allow_crate_root_macros = true
 allow_crate_root_consts = true
 allow_crate_root_fn_calls = true
 
-[rules.absolute_filesystem_paths]
+[rules."shape.file_complexity"]
 level = "warn"
-check_comments = false
-allow_globs = []
-allow_regex = []
+mode = "cyclomatic"
+max_file = 200
+max_fn = 25
 
-include = ["**/*.rs"]
-exclude = ["target/**", ".git/**"]
+[rules."architecture.banned_dependencies"]
+level = "deny"
+banned_prefixes = ["std::process::Command"]
+
+[[scope]]
+include = ["crates/rscheck-cli/**"]
+
+[scope.rules."shape.file_complexity"]
+max_file = 260
+max_fn = 35
 ```
 
-## Use as a library crate
+`semantic = "auto"` runs syntax rules on stable and enables semantic checks when
+the semantic backend is available. `require` fails the run if that backend is
+missing. `off` disables semantic rules.
 
-In another Rust project, add a Git dependency:
+## Rule Families
+
+Current built-in families include:
+- `architecture.*`
+- `design.*`
+- `shape.*`
+- `portability.*`
+
+Current rules include:
+- `architecture.qualified_module_paths`
+- `architecture.banned_dependencies`
+- `architecture.layer_direction`
+- `design.public_api_errors`
+- `design.repeated_type_aliases`
+- `shape.file_complexity`
+- `shape.duplicate_logic`
+- `shape.responsibility_split`
+- `portability.absolute_literal_paths`
+
+## Use As A Library
 
 ```toml
 [dependencies]
 rscheck = { git = "https://github.com/xsyetopz/rscheck" }
 ```
 
-Minimal usage:
-
 ```rust
 use rscheck::analysis::Workspace;
-use rscheck::config::Config;
+use rscheck::config::Policy;
 use rscheck::runner::Runner;
 
 let root = std::env::current_dir().unwrap();
-let cfg = Config::default();
-let ws = Workspace::new(root).load_files(&cfg).unwrap();
-let report = Runner::run(&ws, &cfg);
+let policy = Policy::default();
+let ws = Workspace::new(root).load_files(&policy).unwrap();
+let report = Runner::run(&ws, &policy).unwrap();
 println!("{:#?}", report.worst_severity());
+```
+
+## Local Site
+
+```bash
+bun install
+bun run site:dev
+```
+
+Build the Pages artifact locally:
+
+```bash
+bun run site:build
 ```
