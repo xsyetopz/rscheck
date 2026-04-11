@@ -2,6 +2,13 @@ export const installSnippet = `cargo install --git https://github.com/xsyetopz/r
 rscheck init
 rscheck check --format text`;
 
+export const quickStartSteps = [
+	"Run rscheck init to create a v2 policy file.",
+	"Run rscheck check --format text.",
+	"Enable [adapters.clippy] when you want Clippy findings in the same report.",
+	'Set engine.semantic = "auto", "require", or "off" to match the backend you expect.',
+];
+
 export const policySnippet = `version = 2
 
 [engine]
@@ -25,25 +32,6 @@ include = ["crates/rscheck-cli/**"]
 level = "deny"
 banned_prefixes = ["std::process::Command"]`;
 
-export const featureCards = [
-	{
-		title: "Policy layers",
-		body: "Stack base policy, team policy, and path-scoped overrides in one config instead of spreading decisions across ad-hoc lint toggles.",
-	},
-	{
-		title: "Rule families",
-		body: "Mix architecture, design, portability, and code-shape checks under one report instead of treating everything like style lint.",
-	},
-	{
-		title: "Fix pipeline",
-		body: "Carry machine-safe edits from rscheck rules and Clippy into one pass, with dry runs and write mode built into the CLI.",
-	},
-	{
-		title: "Semantic runway",
-		body: "The v2 engine already models stable syntax rules and an optional semantic backend so deeper Rust checks can land without another config rewrite.",
-	},
-];
-
 export const families = [
 	{
 		name: "Architecture",
@@ -58,7 +46,7 @@ export const families = [
 		points: [
 			"public API error contracts",
 			"repeated type alias candidates",
-			"future construction and export constraints",
+			"construction and export constraints",
 		],
 	},
 	{
@@ -68,5 +56,17 @@ export const families = [
 			"duplicate logic detection",
 			"responsibility split heuristics",
 		],
+	},
+];
+
+export const linkItems = [
+	{ label: "GitHub repository", href: "https://github.com/xsyetopz/rscheck" },
+	{
+		label: "README: install",
+		href: "https://github.com/xsyetopz/rscheck#install",
+	},
+	{
+		label: "README: configuration",
+		href: "https://github.com/xsyetopz/rscheck#configuration",
 	},
 ];

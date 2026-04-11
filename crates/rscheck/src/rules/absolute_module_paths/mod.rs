@@ -19,7 +19,7 @@ impl AbsoluteModulePathsRule {
             id: "architecture.qualified_module_paths",
             family: RuleFamily::Architecture,
             backend: RuleBackend::Syntax,
-            summary: "Flags leading-`::` module paths anywhere in the codebase.",
+            summary: "Flags direct `std::`, `crate::`, and `::` paths in code.",
             default_level: AbsoluteModulePathsConfig::default().level,
             schema: "level, allow_prefixes, roots, allow_crate_root_macros, allow_crate_root_consts, allow_crate_root_fn_calls",
             config_example: "[rules.\"architecture.qualified_module_paths\"]\nlevel = \"deny\"\nroots = [\"std\", \"core\", \"alloc\", \"crate\"]",
@@ -91,10 +91,7 @@ impl Visitor<'_> {
             message: format!("qualified module path: {path_str}"),
             primary: Some(Span::from_pm_span(self.file_path, span)),
             secondary: Vec::new(),
-            help: Some(
-                "Prefer `use` imports and local names; avoid `std::...`/`crate::...`/`::...` in most code."
-                    .to_string(),
-            ),
+            help: Some("Import the item and use the local name.".to_string()),
             evidence: None,
             confidence: None,
             tags: vec!["imports".to_string(), "style".to_string()],
@@ -117,10 +114,7 @@ impl Visitor<'_> {
                 message: format!("qualified module path: {path_str}"),
                 primary: Some(Span::from_pm_span(self.file_path, span)),
                 secondary: Vec::new(),
-                help: Some(
-                    "Prefer `use` imports and local names; avoid `std::...`/`crate::...`/`::...` in most code."
-                        .to_string(),
-                ),
+                help: Some("Import the item and use the local name.".to_string()),
                 evidence: None,
                 confidence: None,
                 tags: vec!["imports".to_string(), "style".to_string()],

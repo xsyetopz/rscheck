@@ -2,281 +2,148 @@ import { CodeHighlight } from "@mantine/code-highlight";
 import {
 	ActionIcon,
 	Anchor,
-	Badge,
-	Button,
-	Code,
 	Container,
-	Flex,
 	Group,
 	List,
 	Paper,
-	SimpleGrid,
 	Stack,
 	Text,
-	ThemeIcon,
 	Title,
+	Tooltip,
+	useMantineColorScheme,
 } from "@mantine/core";
-import {
-	IconArrowRight,
-	IconBrandGithub,
-	IconHammer,
-	IconHierarchy3,
-	IconPlugConnected,
-	IconRadar2,
-} from "@tabler/icons-react";
+import { IconBrightness, IconMoon, IconSun } from "@tabler/icons-react";
 import {
 	families,
-	featureCards,
 	installSnippet,
+	linkItems,
 	policySnippet,
+	quickStartSteps,
 } from "./content";
 
 const repoUrl = "https://github.com/xsyetopz/rscheck";
 
+function ThemeModeControl() {
+	const { colorScheme, setColorScheme } = useMantineColorScheme();
+	const nextColorScheme =
+		colorScheme === "auto"
+			? "light"
+			: colorScheme === "light"
+				? "dark"
+				: "auto";
+	const label =
+		colorScheme === "auto"
+			? "Theme: auto"
+			: colorScheme === "light"
+				? "Theme: light"
+				: "Theme: dark";
+	const icon =
+		colorScheme === "auto" ? (
+			<IconBrightness size={18} />
+		) : colorScheme === "light" ? (
+			<IconSun size={18} />
+		) : (
+			<IconMoon size={18} />
+		);
+
+	return (
+		<Tooltip label={`${label}. Click to switch to ${nextColorScheme}.`}>
+			<ActionIcon
+				aria-label={label}
+				variant="default"
+				size="lg"
+				onClick={() => setColorScheme(nextColorScheme)}
+			>
+				{icon}
+			</ActionIcon>
+		</Tooltip>
+	);
+}
+
 export function App() {
 	return (
 		<div className="page-shell">
-			<Container size="lg" py={32}>
-				<Stack gap={48}>
-					<Paper
-						className="hero-panel"
-						p={{ base: "xl", sm: "2rem" }}
-						radius="xl"
-					>
-						<Stack gap="xl">
-							<Group justify="space-between" align="flex-start">
-								<Stack gap="sm" maw={760}>
-									<Badge
-										variant="filled"
-										color="dark"
-										radius="sm"
-										style={{ alignSelf: "flex-start" }}
-									>
-										rscheck v2
-									</Badge>
-									<Title order={1} fz={{ base: 38, sm: 56 }} lh={1}>
-										Static analysis for Rust teams that need policy, not a pile
-										of toggles.
-									</Title>
-									<Text size="lg" c="dimmed" maw={640}>
-										rscheck sits above compiler diagnostics and Clippy. It lets
-										you enforce architecture lines, API contracts, code-shape
-										rules, and scoped policy layers from one report.
-									</Text>
-								</Stack>
-
-								<ActionIcon
-									component="a"
-									href={repoUrl}
-									size={48}
-									radius="xl"
-									variant="default"
-									aria-label="Open GitHub repository"
-								>
-									<IconBrandGithub size={24} />
-								</ActionIcon>
-							</Group>
-
-							<Group gap="md">
-								<Button
-									component="a"
-									href={`${repoUrl}#install`}
-									size="md"
-									rightSection={<IconArrowRight size={16} />}
-								>
-									Install rscheck
-								</Button>
-								<Button
-									component="a"
-									href={`${repoUrl}#configuration`}
-									size="md"
-									variant="default"
-								>
-									Read the config model
-								</Button>
-							</Group>
-
-							<SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
-								<Paper className="metric-chip" p="md" radius="lg">
-									<Text fw={700}>Layered policy</Text>
-									<Text size="sm" c="dimmed">
-										`extends`, path scopes, adapter controls, and dot rule IDs.
-									</Text>
-								</Paper>
-								<Paper className="metric-chip" p="md" radius="lg">
-									<Text fw={700}>Fix-capable runs</Text>
-									<Text size="sm" c="dimmed">
-										Dry runs, safe writes, and merged fixes from rscheck and
-										Clippy.
-									</Text>
-								</Paper>
-								<Paper className="metric-chip" p="md" radius="lg">
-									<Text fw={700}>Semantic runway</Text>
-									<Text size="sm" c="dimmed">
-										Stable syntax rules today, semantic backend switch already
-										in the policy model.
-									</Text>
-								</Paper>
-							</SimpleGrid>
-						</Stack>
-					</Paper>
-
-					<SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
-						<Paper className="section-card" p="xl" radius="xl">
-							<Stack gap="md">
-								<Group gap="sm">
-									<ThemeIcon variant="light" color="lime" size={38} radius="md">
-										<IconHammer size={20} />
-									</ThemeIcon>
-									<Title order={2}>Get it running</Title>
-								</Group>
-								<Text c="dimmed">
-									The CLI stays small: initialize policy, run checks, choose a
-									report format, and write fixes when the run is clean enough.
-								</Text>
-								<CodeHighlight
-									code={installSnippet}
-									language="bash"
-									withCopyButton={false}
-									radius="md"
-								/>
-							</Stack>
-						</Paper>
-
-						<Paper className="section-card" p="xl" radius="xl">
-							<Stack gap="md">
-								<Group gap="sm">
-									<ThemeIcon variant="light" color="lime" size={38} radius="md">
-										<IconPlugConnected size={20} />
-									</ThemeIcon>
-									<Title order={2}>Policy file, not lint soup</Title>
-								</Group>
-								<Text c="dimmed">
-									V2 policy is built for real repo boundaries: engine mode,
-									Clippy as an adapter, global rules, and path-scoped overrides.
-								</Text>
-								<CodeHighlight
-									code={policySnippet}
-									language="toml"
-									withCopyButton={false}
-									radius="md"
-								/>
-							</Stack>
-						</Paper>
-					</SimpleGrid>
-
-					<Stack gap="lg">
-						<Flex justify="space-between" align="end" gap="md" wrap="wrap">
-							<div>
-								<Title order={2}>What rscheck covers</Title>
-								<Text c="dimmed" maw={620}>
-									The current rule catalog is already split by intent. That is
-									the point: architecture drift, API contract drift, and code
-									shape drift are not the same problem.
-								</Text>
-							</div>
-							<Group gap="xs">
-								<Code>rscheck list-rules</Code>
-								<Code>rscheck explain shape.file_complexity</Code>
-							</Group>
-						</Flex>
-
-						<SimpleGrid cols={{ base: 1, md: 3 }} spacing="lg">
-							{families.map((family) => (
-								<Paper
-									key={family.name}
-									className="section-card"
-									p="xl"
-									radius="xl"
-								>
-									<Stack gap="sm">
-										<Group gap="sm">
-											<ThemeIcon
-												variant="light"
-												color="dark"
-												size={34}
-												radius="md"
-											>
-												{family.name === "Architecture" ? (
-													<IconHierarchy3 size={18} />
-												) : family.name === "Design" ? (
-													<IconRadar2 size={18} />
-												) : (
-													<IconHammer size={18} />
-												)}
-											</ThemeIcon>
-											<Title order={3}>{family.name}</Title>
-										</Group>
-										<List spacing="xs" size="sm">
-											{family.points.map((point) => (
-												<List.Item key={point}>{point}</List.Item>
-											))}
-										</List>
-									</Stack>
-								</Paper>
-							))}
-						</SimpleGrid>
-					</Stack>
-
-					<Paper
-						className="rules-panel"
-						p={{ base: "xl", sm: "2rem" }}
-						radius="xl"
-					>
-						<Stack gap="lg">
-							<div>
-								<Title order={2} c="white">
-									Why this exists
-								</Title>
-								<Text c="gray.4" maw={720}>
-									Clippy is good at linting Rust code. It is not built to own
-									your architecture policy. rscheck gives you a place to enforce
-									team rules that sit above syntax hygiene: layer boundaries,
-									disallowed dependencies, public API error contracts, and
-									repo-specific complexity thresholds.
-								</Text>
-							</div>
-
-							<SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
-								{featureCards.map((card) => (
-									<Paper
-										key={card.title}
-										p="lg"
-										radius="lg"
-										style={{
-											background: "rgba(255,255,255,0.04)",
-											border: "1px solid rgba(255,255,255,0.08)",
-										}}
-									>
-										<Stack gap="xs">
-											<Text fw={700} c="white">
-												{card.title}
-											</Text>
-											<Text size="sm" c="gray.4">
-												{card.body}
-											</Text>
-										</Stack>
-									</Paper>
-								))}
-							</SimpleGrid>
-						</Stack>
-					</Paper>
-
-					<Paper className="footer-band" p="xl" radius="xl">
-						<Stack gap="md">
-							<Title order={3}>Use the repo as the source of truth</Title>
-							<Text c="dimmed">
-								The site is a front door. The working surface lives in the repo:
-								current CLI docs, example policy files, and the evolving rule
-								catalog.
+			<Container size="md" py={{ base: 24, sm: 40 }}>
+				<Stack gap="lg">
+					<Group justify="space-between" align="flex-start" gap="md">
+						<Stack gap={6}>
+							<Title order={1}>rscheck</Title>
+							<Text c="dimmed" maw={680}>
+								Checks Rust workspaces against layered rules, scoped
+								configuration, and checks that Clippy does not cover.
 							</Text>
-							<Group gap="md">
-								<Anchor href={repoUrl}>GitHub repository</Anchor>
-								<Anchor href={`${repoUrl}#install`}>README install</Anchor>
-								<Anchor href={`${repoUrl}#configuration`}>
-									README configuration
-								</Anchor>
-							</Group>
+						</Stack>
+						<ThemeModeControl />
+					</Group>
+
+					<Paper className="section-block" p="lg" radius="md">
+						<Stack gap="sm">
+							<Title order={2}>Install</Title>
+							<CodeHighlight
+								code={installSnippet}
+								language="bash"
+								radius="md"
+								withCopyButton={false}
+							/>
+						</Stack>
+					</Paper>
+
+					<Paper className="section-block" p="lg" radius="md">
+						<Stack gap="sm">
+							<Title order={2}>Quick Start</Title>
+							<List spacing="xs">
+								{quickStartSteps.map((step) => (
+									<List.Item key={step}>{step}</List.Item>
+								))}
+							</List>
+						</Stack>
+					</Paper>
+
+					<Paper className="section-block" p="lg" radius="md">
+						<Stack gap="sm">
+							<Title order={2}>Policy</Title>
+							<Text c="dimmed">
+								A v2 policy file sets engine mode, adapters, root rules, and
+								path-scoped overrides.
+							</Text>
+							<CodeHighlight
+								code={policySnippet}
+								language="toml"
+								radius="md"
+								withCopyButton={false}
+							/>
+						</Stack>
+					</Paper>
+
+					<Paper className="section-block" p="lg" radius="md">
+						<Stack gap="sm">
+							<Title order={2}>Rules</Title>
+							{families.map((family) => (
+								<div key={family.name}>
+									<Text fw={600}>{family.name}</Text>
+									<List spacing="xs" size="sm" mt={6}>
+										{family.points.map((point) => (
+											<List.Item key={point}>{point}</List.Item>
+										))}
+									</List>
+								</div>
+							))}
+						</Stack>
+					</Paper>
+
+					<Paper className="section-block" p="lg" radius="md">
+						<Stack gap="sm">
+							<Title order={2}>Links</Title>
+							<List spacing="xs" size="sm">
+								{linkItems.map((item) => (
+									<List.Item key={item.href}>
+										<Anchor href={item.href}>{item.label}</Anchor>
+									</List.Item>
+								))}
+							</List>
+							<Text size="sm" c="dimmed">
+								Repository: <Anchor href={repoUrl}>{repoUrl}</Anchor>
+							</Text>
 						</Stack>
 					</Paper>
 				</Stack>

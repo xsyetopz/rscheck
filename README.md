@@ -1,10 +1,10 @@
 # rscheck
 
-`rscheck` is a policy-driven static analysis tool for Rust workspaces.
+`rscheck` checks Rust workspaces against layered project rules.
 
-It is built for checks that sit above compiler errors and default Clippy linting:
-architecture boundaries, API contracts, duplication thresholds, scoped rule
-overrides, and repo-specific design constraints.
+It covers rules that sit above compiler errors and default Clippy linting:
+architecture boundaries, API contracts, duplication thresholds, scoped
+overrides, and repo-specific constraints.
 
 Site: <https://xsyetopz.github.io/rscheck/>
 
@@ -76,9 +76,8 @@ rscheck explain shape.file_complexity
 
 ## Configuration
 
-`rscheck` reads `.rscheck.toml` from the workspace root. The v2 config is
-policy-first: engine mode, adapters, rule IDs in dot form, and path-scoped
-overrides.
+`rscheck` reads `.rscheck.toml` from the workspace root. The v2 config uses
+engine mode, adapters, dot-form rule IDs, and path-scoped overrides.
 
 ```toml
 version = 2
@@ -123,7 +122,7 @@ max_file = 260
 max_fn = 35
 ```
 
-`semantic = "auto"` runs syntax rules on stable and enables semantic checks when
+`semantic = "auto"` runs syntax rules on stable and runs semantic checks when
 the semantic backend is available. `require` fails the run if that backend is
 missing. `off` disables semantic rules.
 

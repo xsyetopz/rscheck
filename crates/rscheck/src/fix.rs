@@ -41,12 +41,8 @@ pub fn line_col_to_byte_offset(text: &str, line_1: u32, col_1: u32) -> Result<us
         col += 1;
         byte_in_line = bidx + ch.len_utf8();
     }
-    if col < target_col {
-        if target_col == col {
-            // ok
-        } else {
-            return Err(FixError::InvalidLineColumn);
-        }
+    if col < target_col && target_col != col {
+        return Err(FixError::InvalidLineColumn);
     }
 
     Ok(idx + byte_in_line)

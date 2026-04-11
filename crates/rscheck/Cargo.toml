@@ -9,7 +9,7 @@ repository.workspace = true
 publish.workspace = true
 readme.workspace = true
 
-description = "Policy-driven static analysis library for Rust workspaces."
+description = "Library for checking Rust workspaces against layered rules."
 
 [features]
 default = []

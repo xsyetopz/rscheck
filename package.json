@@ -1,13 +1,16 @@
 {
 	"name": "@xsyetopz/rscheck-site",
 	"version": "0.1.0",
-	"description": "Landing page and frontend tooling for rscheck",
+	"description": "Site and frontend tooling for rscheck",
 	"type": "module",
 	"private": true,
 	"scripts": {
 		"site:dev": "vite --config site/vite.config.ts",
 		"site:build": "vite build --config site/vite.config.ts",
 		"site:preview": "vite preview --config site/vite.config.ts",
+		"dev": "vite --config site/vite.config.ts",
+		"build": "vite build --config site/vite.config.ts",
+		"preview": "vite preview --config site/vite.config.ts",
 		"typecheck": "bunx tsc --noEmit",
 		"typecheck:build": "bunx tsc -p tsconfig.build.json --noEmit",
 		"biome:check": "bunx biome check . --max-diagnostics 16384",

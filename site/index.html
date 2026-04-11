@@ -3,24 +3,40 @@
 	<head>
 		<meta charset="UTF-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>rscheck | Policy-Driven Rust Static Analysis</title>
+		<title>rscheck</title>
 		<meta
 			name="description"
-			content="rscheck is a policy-driven static analysis tool for Rust workspaces. It layers project rules, architecture checks, and fixable findings on top of compiler and Clippy diagnostics."
+			content="rscheck checks Rust workspaces against layered project rules."
 		>
 		<meta property="og:type" content="website">
-		<meta property="og:title" content="rscheck | Policy-Driven Rust Static Analysis">
+		<meta property="og:title" content="rscheck">
 		<meta
 			property="og:description"
-			content="Static analysis for Rust workspaces with policy layers, scoped rules, fixable findings, and architecture checks beyond Clippy."
+			content="Checks Rust workspaces against layered project rules."
 		>
 		<meta property="og:url" content="https://xsyetopz.github.io/rscheck/">
-		<meta name="twitter:card" content="summary_large_image">
-		<meta name="twitter:title" content="rscheck | Policy-Driven Rust Static Analysis">
+		<meta name="twitter:card" content="summary">
+		<meta name="twitter:title" content="rscheck">
 		<meta
 			name="twitter:description"
-			content="Static analysis for Rust workspaces with policy layers, scoped rules, fixable findings, and architecture checks beyond Clippy."
+			content="Checks Rust workspaces against layered project rules."
 		>
+		<script>
+			(function () {
+				const key = "rscheck-color-scheme";
+				const stored = window.localStorage.getItem(key);
+				const value =
+					stored === "light" || stored === "dark" || stored === "auto"
+						? stored
+						: "auto";
+				const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+				const resolved = value === "auto" ? (systemDark ? "dark" : "light") : value;
+				document.documentElement.setAttribute(
+					"data-mantine-color-scheme",
+					resolved,
+				);
+			})();
+		</script>
 	</head>
 	<body>
 		<div id="root"></div>

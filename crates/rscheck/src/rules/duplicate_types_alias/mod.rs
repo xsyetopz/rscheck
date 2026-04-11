@@ -17,7 +17,7 @@ impl DuplicateTypesAliasCandidateRule {
             id: "design.repeated_type_aliases",
             family: RuleFamily::Design,
             backend: RuleBackend::Syntax,
-            summary: "Finds repeated identical type annotations that could be extracted into a `type` alias.",
+            summary: "Reports repeated type annotations that may need a `type` alias.",
             default_level: DuplicateTypesAliasConfig::default().level,
             schema: "level, min_occurrences, min_len, exclude_outer",
             config_example: "[rules.\"design.repeated_type_aliases\"]\nlevel = \"warn\"\nmin_occurrences = 3",
@@ -75,7 +75,7 @@ impl Rule for DuplicateTypesAliasCandidateRule {
                     primary,
                     secondary: Vec::new(),
                     help: Some(
-                        "Introduce `type Alias = ...;` and use it consistently.".to_string(),
+                        "Add a `type` alias if the repeated type should have one name.".to_string(),
                     ),
                     evidence: None,
                     confidence: None,
