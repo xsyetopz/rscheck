@@ -2,7 +2,10 @@ use crate::analysis::Workspace;
 use crate::config::AbsoluteModulePathsConfig;
 use crate::emit::Emitter;
 use crate::fix::{find_use_insertion_offset, line_col_to_byte_offset};
-use crate::report::{Finding, Fix, FixSafety, Severity, TextEdit};
+use crate::report::{
+    Finding, FindingLabel, FindingLabelKind, FindingNote, FindingNoteKind, Fix, FixSafety,
+    Severity, TextEdit,
+};
 use crate::rules::{Rule, RuleBackend, RuleContext, RuleFamily, RuleInfo};
 use crate::span::Span;
 use quote::ToTokens;
@@ -95,6 +98,15 @@ impl Visitor<'_> {
             evidence: None,
             confidence: None,
             tags: vec!["imports".to_string(), "style".to_string()],
+            labels: vec![FindingLabel {
+                kind: FindingLabelKind::Primary,
+                span: Span::from_pm_span(self.file_path, span),
+                message: Some("qualified path used here".to_string()),
+            }],
+            notes: vec![FindingNote {
+                kind: FindingNoteKind::Help,
+                message: "Import the item and use the local name.".to_string(),
+            }],
             fixes,
         });
     }
@@ -118,6 +130,15 @@ impl Visitor<'_> {
                 evidence: None,
                 confidence: None,
                 tags: vec!["imports".to_string(), "style".to_string()],
+                labels: vec![FindingLabel {
+                    kind: FindingLabelKind::Primary,
+                    span: Span::from_pm_span(self.file_path, span),
+                    message: Some("qualified path used here".to_string()),
+                }],
+                notes: vec![FindingNote {
+                    kind: FindingNoteKind::Help,
+                    message: "Import the item and use the local name.".to_string(),
+                }],
                 fixes,
             });
         }
@@ -424,41 +445,88 @@ fn name_conflicts(file_text: &str, name: Option<&str>) -> bool {
         return false;
     };
 
-    let mut taken: HashSet<String> = HashSet::new();
-    for item in ast.items {
-        match item {
-            syn::Item::Const(i) => {
-                taken.insert(i.ident.to_string());
-            }
-            syn::Item::Enum(i) => {
-                taken.insert(i.ident.to_string());
-            }
-            syn::Item::Fn(i) => {
-                taken.insert(i.sig.ident.to_string());
-            }
-            syn::Item::Mod(i) => {
-                taken.insert(i.ident.to_string());
-            }
-            syn::Item::Static(i) => {
-                taken.insert(i.ident.to_string());
-            }
-            syn::Item::Struct(i) => {
-                taken.insert(i.ident.to_string());
-            }
-            syn::Item::Trait(i) => {
-                taken.insert(i.ident.to_string());
-            }
-            syn::Item::Type(i) => {
-                taken.insert(i.ident.to_string());
-            }
-            syn::Item::Use(i) => {
-                collect_use_names(&i.tree, &mut taken);
-            }
-            _ => {}
-        }
+    let mut collector = TakenNameCollector {
+        taken: HashSet::new(),
+    };
+    collector.visit_file(&ast);
+    let taken = collector.taken;
+    taken.contains(name)
+}
+
+struct TakenNameCollector {
+    taken: HashSet<String>,
+}
+
+impl TakenNameCollector {
+    fn insert_ident(&mut self, ident: &syn::Ident) {
+        self.taken.insert(ident.to_string());
+    }
+}
+
+impl<'ast> Visit<'ast> for TakenNameCollector {
+    fn visit_item_const(&mut self, node: &'ast syn::ItemConst) {
+        self.insert_ident(&node.ident);
+        syn::visit::visit_item_const(self, node);
     }
 
-    taken.contains(name)
+    fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
+        self.insert_ident(&node.ident);
+        syn::visit::visit_item_enum(self, node);
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        self.insert_ident(&node.sig.ident);
+        syn::visit::visit_item_fn(self, node);
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        self.insert_ident(&node.ident);
+        syn::visit::visit_item_mod(self, node);
+    }
+
+    fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
+        self.insert_ident(&node.ident);
+        syn::visit::visit_item_static(self, node);
+    }
+
+    fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
+        self.insert_ident(&node.ident);
+        syn::visit::visit_item_struct(self, node);
+    }
+
+    fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
+        self.insert_ident(&node.ident);
+        syn::visit::visit_item_trait(self, node);
+    }
+
+    fn visit_item_type(&mut self, node: &'ast syn::ItemType) {
+        self.insert_ident(&node.ident);
+        syn::visit::visit_item_type(self, node);
+    }
+
+    fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
+        collect_use_names(&node.tree, &mut self.taken);
+        syn::visit::visit_item_use(self, node);
+    }
+
+    fn visit_local(&mut self, node: &'ast syn::Local) {
+        collect_pat_names(&node.pat, &mut self.taken);
+        syn::visit::visit_local(self, node);
+    }
+
+    fn visit_pat_ident(&mut self, node: &'ast syn::PatIdent) {
+        self.insert_ident(&node.ident);
+        syn::visit::visit_pat_ident(self, node);
+    }
+
+    fn visit_generic_param(&mut self, node: &'ast syn::GenericParam) {
+        match node {
+            syn::GenericParam::Type(param) => self.insert_ident(&param.ident),
+            syn::GenericParam::Const(param) => self.insert_ident(&param.ident),
+            syn::GenericParam::Lifetime(_) => {}
+        }
+        syn::visit::visit_generic_param(self, node);
+    }
 }
 
 fn collect_use_names(tree: &syn::UseTree, out: &mut HashSet<String>) {
@@ -478,5 +546,42 @@ fn collect_use_names(tree: &syn::UseTree, out: &mut HashSet<String>) {
                 collect_use_names(it, out);
             }
         }
+    }
+}
+
+fn collect_pat_names(pat: &syn::Pat, out: &mut HashSet<String>) {
+    match pat {
+        syn::Pat::Ident(ident) => {
+            out.insert(ident.ident.to_string());
+        }
+        syn::Pat::Or(or_pat) => {
+            for case in &or_pat.cases {
+                collect_pat_names(case, out);
+            }
+        }
+        syn::Pat::Paren(paren) => collect_pat_names(&paren.pat, out),
+        syn::Pat::Reference(reference) => collect_pat_names(&reference.pat, out),
+        syn::Pat::Slice(slice) => {
+            for elem in &slice.elems {
+                collect_pat_names(elem, out);
+            }
+        }
+        syn::Pat::Struct(struct_pat) => {
+            for field in &struct_pat.fields {
+                collect_pat_names(&field.pat, out);
+            }
+        }
+        syn::Pat::Tuple(tuple) => {
+            for elem in &tuple.elems {
+                collect_pat_names(elem, out);
+            }
+        }
+        syn::Pat::TupleStruct(tuple) => {
+            for elem in &tuple.elems {
+                collect_pat_names(elem, out);
+            }
+        }
+        syn::Pat::Type(typed) => collect_pat_names(&typed.pat, out),
+        _ => {}
     }
 }

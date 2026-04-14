@@ -9,16 +9,25 @@ pub struct Runner;
 
 impl Runner {
     pub fn run(ws: &Workspace, policy: &Policy) -> Result<Report, RunError> {
+        let semantic_status = SemanticBackendStatus::probe();
+        Self::run_with_semantic_status(ws, policy, semantic_status)
+    }
+
+    pub fn run_with_semantic_status(
+        ws: &Workspace,
+        policy: &Policy,
+        semantic_status: SemanticBackendStatus,
+    ) -> Result<Report, RunError> {
         let mut report = Report {
             rule_catalog: rules::rule_catalog_entries(),
             ..Report::default()
         };
 
-        let semantic_status = SemanticBackendStatus::probe();
         if policy.engine.semantic == EngineMode::Require && !semantic_status.is_available() {
             return Err(RunError::SemanticBackendRequired(
                 semantic_status
                     .reason
+                    .clone()
                     .unwrap_or_else(|| "semantic backend unavailable".to_string()),
             ));
         }
@@ -40,9 +49,12 @@ impl Runner {
         report.findings = emitter.findings;
         report.metrics.per_file = emitter.metrics;
         report.summary.semantic_backend_available = semantic_status.is_available();
+        report.summary.semantic_backend_reason = semantic_status.reason;
         report.summary.adapter_runs.push(AdapterRun {
             name: "clippy".to_string(),
             enabled: policy.adapters.clippy.enabled,
+            toolchain: None,
+            status: None,
         });
         Ok(report)
     }

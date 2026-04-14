@@ -111,3 +111,32 @@ fn f() {
     assert!(new_code.contains("let _p: PathBuf"));
     assert!(new_code.contains("PathBuf::from"));
 }
+
+#[test]
+fn marks_fix_unsafe_when_local_name_conflicts() {
+    let code = r#"
+fn f() {
+    let PathBuf = 1;
+    let _p: std::path::PathBuf = std::path::PathBuf::from(".");
+}
+"#;
+    let ws = ws_with_single_file(code);
+
+    let mut cfg = Policy::default();
+    cfg.rules.insert(
+        "architecture.qualified_module_paths".to_string(),
+        RuleSettings {
+            level: Some(Level::Deny),
+            options: toml::Table::new(),
+        },
+    );
+    let mut emitter = ReportEmitter::new();
+    AbsoluteModulePathsRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
+
+    let finding = emitter
+        .findings
+        .iter()
+        .find(|f| f.message.contains("std::path::PathBuf"))
+        .expect("expected PathBuf finding");
+    assert_eq!(finding.fixes[0].safety, crate::report::FixSafety::Unsafe);
+}

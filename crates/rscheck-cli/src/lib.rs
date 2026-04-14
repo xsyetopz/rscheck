@@ -3,19 +3,23 @@ mod config_file;
 mod fix_apply;
 mod report_html;
 mod report_sarif;
+mod text_report;
+mod toolchain;
 
 use cargo_clippy::run_clippy;
 use clap::Parser;
 use config_file::{default_config_path, load_from, workspace_root, write_default_config};
-use fix_apply::{apply_planned_edits, plan_edits, print_dry_run};
+use fix_apply::{ApplyError, PlannedEdits, apply_planned_edits, plan_edits, print_dry_run};
 use rscheck::analysis::Workspace;
-use rscheck::config::{OutputFormat, Policy};
-use rscheck::report::{FixSafety, Report};
+use rscheck::config::{OutputFormat, Policy, ToolchainMode};
+use rscheck::report::{AdapterRun, Report};
 use rscheck::rules;
 use rscheck::runner::Runner;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode as ProcessExitCode;
 use std::{fs, io};
+use text_report::render_text_report;
+use toolchain::{ResolvedToolchain, resolve_toolchain};
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
@@ -99,8 +103,28 @@ pub struct CheckArgs {
     #[arg(long, default_value_t = 10)]
     pub max_fix_iterations: u32,
 
+    #[arg(long, value_enum)]
+    pub toolchain: Option<ToolchainArg>,
+
     #[arg(trailing_var_arg = true)]
     pub cargo_args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum ToolchainArg {
+    Current,
+    Auto,
+    Nightly,
+}
+
+impl From<ToolchainArg> for ToolchainMode {
+    fn from(value: ToolchainArg) -> Self {
+        match value {
+            ToolchainArg::Current => ToolchainMode::Current,
+            ToolchainArg::Auto => ToolchainMode::Auto,
+            ToolchainArg::Nightly => ToolchainMode::Nightly,
+        }
+    }
 }
 
 #[derive(Debug, clap::Args)]
@@ -183,140 +207,274 @@ fn run_init(args: InitArgs) -> ExitCode {
 }
 
 fn run_check(args: CheckArgs) -> ExitCode {
-    if args.write && args.dry_run {
-        eprintln!("`--write` and `--dry-run` are mutually exclusive");
-        return ExitCode::from(2);
+    if let Err(code) = validate_check_args(&args) {
+        return code;
     }
 
-    let root = match workspace_root() {
+    let root = match resolve_workspace_root() {
         Ok(root) => root,
-        Err(err) => {
-            eprintln!("{err}");
-            return ExitCode::from(2);
-        }
+        Err(code) => return code,
+    };
+    let policy = match load_check_policy(&args, &root) {
+        Ok(policy) => policy,
+        Err(code) => return code,
+    };
+    let resolved_toolchain = match resolve_toolchain(&policy, args.toolchain.map(Into::into)) {
+        Ok(toolchain) => toolchain,
+        Err(err) => return toolchain_error_to_exit_code(err),
     };
 
+    execute_check_iterations(args, root, policy, resolved_toolchain)
+}
+
+fn validate_check_args(args: &CheckArgs) -> Result<(), ExitCode> {
+    if args.write && args.dry_run {
+        eprintln!("`--write` and `--dry-run` are mutually exclusive");
+        return Err(ExitCode::from(2));
+    }
+    Ok(())
+}
+
+fn resolve_workspace_root() -> Result<PathBuf, ExitCode> {
+    workspace_root().map_err(|err| {
+        eprintln!("{err}");
+        ExitCode::from(2)
+    })
+}
+
+fn load_check_policy(args: &CheckArgs, root: &Path) -> Result<Policy, ExitCode> {
     let config_path = args
         .out
         .config
-        .unwrap_or_else(|| default_config_path(&root));
+        .clone()
+        .unwrap_or_else(|| default_config_path(root));
     let mut policy = if config_path.exists() {
-        match load_from(&config_path) {
-            Ok(cfg) => cfg,
-            Err(err) => {
-                eprintln!("{err}");
-                return ExitCode::from(2);
-            }
-        }
+        load_from(&config_path).map_err(|err| {
+            eprintln!("{err}");
+            ExitCode::from(2)
+        })?
     } else {
         Policy::default_with_rules(rules::default_rule_settings())
     };
-
     if let Some(format) = args.out.format {
         policy.output.format = format.into();
     }
-    if let Some(output) = args.out.output {
+    if let Some(output) = args.out.output.clone() {
         policy.output.output = Some(output);
     }
+    Ok(policy)
+}
 
-    let wants_fix = args.write || args.dry_run;
+fn execute_check_iterations(
+    args: CheckArgs,
+    root: PathBuf,
+    policy: Policy,
+    resolved_toolchain: ResolvedToolchain,
+) -> ExitCode {
+    let iterations = iteration_count(&args);
     let mut last_report = Report::default();
 
-    let iterations = if wants_fix {
+    for is_last in (0..iterations).map(|iter| iter + 1 == iterations) {
+        let ws = match load_workspace(root.clone(), &policy) {
+            Ok(ws) => ws,
+            Err(code) => return code,
+        };
+        let report = match build_iteration_report(&args, &policy, &resolved_toolchain, &ws) {
+            Ok(report) => report,
+            Err(code) => return code,
+        };
+        let action = match handle_iteration(&args, &policy, &report) {
+            Ok(action) => action,
+            Err(code) => return code,
+        };
+        match action {
+            IterationAction::Return(code) => return code,
+            IterationAction::ContinueWithReport(report) => {
+                last_report = *report;
+                if is_last {
+                    break;
+                }
+            }
+        }
+    }
+
+    finish_write_mode(&last_report, &policy)
+}
+
+fn iteration_count(args: &CheckArgs) -> u32 {
+    if args.write || args.dry_run {
         args.max_fix_iterations.max(1)
     } else {
         1
-    };
-
-    for iter in 0..iterations {
-        let ws = match Workspace::new(root.clone()).load_files(&policy) {
-            Ok(ws) => ws,
-            Err(err) => {
-                eprintln!("{err}");
-                return ExitCode::from(2);
-            }
-        };
-
-        let mut report = if args.rscheck {
-            match Runner::run(&ws, &policy) {
-                Ok(report) => report,
-                Err(err) => {
-                    eprintln!("{err}");
-                    return ExitCode::from(2);
-                }
-            }
-        } else {
-            Report::default()
-        };
-
-        if policy.adapters.clippy.enabled {
-            let mut clippy_args = policy.adapters.clippy.args.clone();
-            clippy_args.extend(args.cargo_args.clone());
-            match run_clippy(&ws.root, &clippy_args) {
-                Ok(mut findings) => report.findings.append(&mut findings),
-                Err(err) => {
-                    eprintln!("{err}");
-                    return ExitCode::from(2);
-                }
-            }
-        }
-
-        let planned = plan_edits(&report, args.unsafe_fixes);
-
-        if args.dry_run {
-            match print_dry_run(&planned) {
-                Ok(would_change) => {
-                    if let Err(err) = write_report(&report, &policy) {
-                        eprintln!("{err}");
-                        return ExitCode::from(2);
-                    }
-                    return ExitCode::from(if would_change { 1 } else { 0 });
-                }
-                Err(err) => {
-                    eprintln!("{err}");
-                    return ExitCode::from(2);
-                }
-            }
-        }
-
-        if args.write {
-            if planned.is_empty() {
-                last_report = report;
-                break;
-            }
-            match apply_planned_edits(&planned) {
-                Ok(applied) => {
-                    if !applied {
-                        last_report = report;
-                        break;
-                    }
-                }
-                Err(err) => {
-                    eprintln!("{err}");
-                    return ExitCode::from(2);
-                }
-            }
-
-            last_report = report;
-            if iter + 1 == iterations {
-                break;
-            }
-            continue;
-        }
-
-        if let Err(err) = write_report(&report, &policy) {
-            eprintln!("{err}");
-            return ExitCode::from(2);
-        }
-        return ExitCode::from(report.worst_severity().exit_code());
     }
+}
 
-    if let Err(err) = write_report(&last_report, &policy) {
+enum IterationAction {
+    Return(ExitCode),
+    ContinueWithReport(Box<Report>),
+}
+
+fn handle_iteration(
+    args: &CheckArgs,
+    policy: &Policy,
+    report: &Report,
+) -> Result<IterationAction, ExitCode> {
+    let planned = plan_edits(report, args.unsafe_fixes);
+    if args.dry_run {
+        return dry_run_result(policy, report, &planned).map(IterationAction::Return);
+    }
+    if !args.write {
+        return write_and_return(policy, report).map(IterationAction::Return);
+    }
+    apply_write_iteration(report, &planned)
+        .map(Box::new)
+        .map(IterationAction::ContinueWithReport)
+}
+
+fn dry_run_result(
+    policy: &Policy,
+    report: &Report,
+    planned: &PlannedEdits,
+) -> Result<ExitCode, ExitCode> {
+    let would_change = print_dry_run(planned).map_err(io_error_to_exit_code)?;
+    write_report(report, policy).map_err(output_error_to_exit_code)?;
+    Ok(ExitCode::from(if would_change { 1 } else { 0 }))
+}
+
+fn write_and_return(policy: &Policy, report: &Report) -> Result<ExitCode, ExitCode> {
+    write_report(report, policy).map_err(output_error_to_exit_code)?;
+    Ok(ExitCode::from(report.worst_severity().exit_code()))
+}
+
+fn apply_write_iteration(report: &Report, planned: &PlannedEdits) -> Result<Report, ExitCode> {
+    if planned.is_empty() {
+        return Ok(report.clone());
+    }
+    let _applied = apply_planned_edits(planned).map_err(io_error_to_exit_code)?;
+    Ok(report.clone())
+}
+
+fn finish_write_mode(report: &Report, policy: &Policy) -> ExitCode {
+    if let Err(err) = write_report(report, policy) {
+        return output_error_to_exit_code(err);
+    }
+    ExitCode::from(report.worst_severity().exit_code())
+}
+
+fn load_workspace(root: PathBuf, policy: &Policy) -> Result<Workspace, ExitCode> {
+    Workspace::new(root).load_files(policy).map_err(|err| {
         eprintln!("{err}");
-        return ExitCode::from(2);
+        ExitCode::from(2)
+    })
+}
+
+fn build_iteration_report(
+    args: &CheckArgs,
+    policy: &Policy,
+    resolved_toolchain: &ResolvedToolchain,
+    ws: &Workspace,
+) -> Result<Report, ExitCode> {
+    let mut report = run_rscheck_engine(args.rscheck, policy, resolved_toolchain, ws)?;
+    run_clippy_adapter(
+        &mut report,
+        policy,
+        resolved_toolchain,
+        ws,
+        &args.cargo_args,
+    )?;
+    report.summary.toolchain = Some(resolved_toolchain.summary());
+    Ok(report)
+}
+
+fn run_rscheck_engine(
+    enabled: bool,
+    policy: &Policy,
+    resolved_toolchain: &ResolvedToolchain,
+    ws: &Workspace,
+) -> Result<Report, ExitCode> {
+    if !enabled {
+        return Ok(Report::default());
     }
 
-    ExitCode::from(last_report.worst_severity().exit_code())
+    Runner::run_with_semantic_status(ws, policy, resolved_toolchain.semantic_status()).map_err(
+        |err| {
+            eprintln!("{err}");
+            ExitCode::from(2)
+        },
+    )
+}
+
+fn run_clippy_adapter(
+    report: &mut Report,
+    policy: &Policy,
+    resolved_toolchain: &ResolvedToolchain,
+    ws: &Workspace,
+    cargo_args: &[String],
+) -> Result<(), ExitCode> {
+    if !policy.adapters.clippy.enabled {
+        return Ok(());
+    }
+
+    ensure_clippy_adapter_run(report);
+    let toolchain = resolved_toolchain
+        .clippy_selector(policy.adapters.clippy.toolchain)
+        .map_err(toolchain_error_to_exit_code)?;
+    let runtime = resolved_toolchain
+        .clippy_runtime_label(policy.adapters.clippy.toolchain)
+        .map_err(toolchain_error_to_exit_code)?;
+    let mut clippy_args = policy.adapters.clippy.args.clone();
+    clippy_args.extend(cargo_args.iter().cloned());
+    let mut findings = run_clippy(&ws.root, toolchain, &clippy_args).map_err(|err| {
+        eprintln!("{err}");
+        ExitCode::from(2)
+    })?;
+    report.findings.append(&mut findings);
+    set_clippy_adapter_status(report, runtime);
+    Ok(())
+}
+
+fn ensure_clippy_adapter_run(report: &mut Report) {
+    if report
+        .summary
+        .adapter_runs
+        .iter()
+        .any(|run| run.name == "clippy")
+    {
+        return;
+    }
+    report.summary.adapter_runs.push(AdapterRun {
+        name: "clippy".to_string(),
+        enabled: true,
+        toolchain: None,
+        status: None,
+    });
+}
+
+fn set_clippy_adapter_status(report: &mut Report, runtime: String) {
+    if let Some(adapter_run) = report
+        .summary
+        .adapter_runs
+        .iter_mut()
+        .find(|run| run.name == "clippy")
+    {
+        adapter_run.toolchain = Some(runtime);
+        adapter_run.status = Some("ok".to_string());
+    }
+}
+
+fn toolchain_error_to_exit_code(err: toolchain::ToolchainError) -> ExitCode {
+    eprintln!("{err}");
+    ExitCode::from(2)
+}
+
+fn io_error_to_exit_code(err: ApplyError) -> ExitCode {
+    eprintln!("{err}");
+    ExitCode::from(2)
+}
+
+fn output_error_to_exit_code(err: OutputError) -> ExitCode {
+    eprintln!("{err}");
+    ExitCode::from(2)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -329,7 +487,7 @@ pub enum OutputError {
 
 fn write_report(report: &Report, policy: &Policy) -> Result<(), OutputError> {
     let text = match policy.output.format {
-        OutputFormat::Text => text_report(report),
+        OutputFormat::Text => render_text_report(report),
         OutputFormat::Json => {
             serde_json::to_string_pretty(report).map_err(OutputError::Serialize)?
         }
@@ -345,41 +503,4 @@ fn write_report(report: &Report, policy: &Policy) -> Result<(), OutputError> {
             Ok(())
         }
     }
-}
-
-fn text_report(report: &Report) -> String {
-    let mut out = String::new();
-    for f in &report.findings {
-        let fixable = f.fixes.iter().any(|fx| fx.safety == FixSafety::Safe);
-        match &f.primary {
-            Some(span) => {
-                out.push_str(&format!(
-                    "{}:{}:{}: {:?}[{}]: {}{}\n",
-                    span.file,
-                    span.start.line,
-                    span.start.column,
-                    f.severity,
-                    f.rule_id,
-                    f.message,
-                    if fixable { " (fixable)" } else { "" }
-                ));
-            }
-            None => {
-                out.push_str(&format!(
-                    "{:?}[{}]: {}{}\n",
-                    f.severity,
-                    f.rule_id,
-                    f.message,
-                    if fixable { " (fixable)" } else { "" }
-                ));
-            }
-        }
-    }
-    if !report.summary.skipped_rules.is_empty() {
-        out.push_str("\nskipped semantic rules:\n");
-        for rule in &report.summary.skipped_rules {
-            out.push_str(&format!("- {rule}\n"));
-        }
-    }
-    out
 }

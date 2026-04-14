@@ -1,10 +1,13 @@
 use crate::analysis::Workspace;
 use crate::config::BannedDependenciesConfig;
 use crate::emit::Emitter;
-use crate::report::Finding;
+use crate::path_pattern::matches_path_prefix;
+use crate::report::{Finding, Severity};
+use crate::rules::use_tree_path::flatten as flatten_use_tree_path;
 use crate::rules::{Rule, RuleBackend, RuleContext, RuleFamily, RuleInfo};
 use crate::span::Span;
 use quote::ToTokens;
+use std::path::Path;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
@@ -55,9 +58,9 @@ impl Rule for BannedDependenciesRule {
 }
 
 struct DependencyVisitor<'a> {
-    file: &'a std::path::Path,
+    file: &'a Path,
     banned_prefixes: &'a [String],
-    severity: crate::report::Severity,
+    severity: Severity,
     out: &'a mut dyn Emitter,
 }
 
@@ -67,7 +70,7 @@ impl DependencyVisitor<'_> {
         if let Some(prefix) = self
             .banned_prefixes
             .iter()
-            .find(|prefix| text.starts_with(prefix.as_str()))
+            .find(|prefix| matches_path_prefix(&text, prefix))
         {
             self.out.emit(Finding {
                 rule_id: BannedDependenciesRule::static_info().id.to_string(),
@@ -81,6 +84,8 @@ impl DependencyVisitor<'_> {
                 evidence: None,
                 confidence: None,
                 tags: vec!["dependencies".to_string()],
+                labels: Vec::new(),
+                notes: Vec::new(),
                 fixes: Vec::new(),
             });
         }
@@ -107,18 +112,7 @@ impl<'ast> Visit<'ast> for DependencyVisitor<'_> {
 }
 
 fn use_tree_path(tree: &syn::UseTree) -> Option<syn::Path> {
-    match tree {
-        syn::UseTree::Path(path) => {
-            let mut segments = syn::punctuated::Punctuated::new();
-            segments.push(path.ident.clone().into());
-            let mut tail = use_tree_path(&path.tree)?;
-            segments.extend(tail.segments);
-            tail.segments = segments;
-            Some(tail)
-        }
-        syn::UseTree::Name(name) => Some(syn::Path::from(name.ident.clone())),
-        _ => None,
-    }
+    flatten_use_tree_path(tree)
 }
 
 #[cfg(test)]

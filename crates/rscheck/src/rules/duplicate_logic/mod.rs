@@ -125,6 +125,8 @@ impl Rule for DuplicateLogicRule {
                 evidence: Some(evidence),
                 confidence: None,
                 tags: vec!["duplication".to_string()],
+                labels: Vec::new(),
+                notes: Vec::new(),
                 fixes: Vec::new(),
             });
         }

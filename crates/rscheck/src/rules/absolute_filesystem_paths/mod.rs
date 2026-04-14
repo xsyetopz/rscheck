@@ -1,7 +1,9 @@
 use crate::analysis::Workspace;
 use crate::config::AbsoluteFilesystemPathsConfig;
 use crate::emit::Emitter;
-use crate::report::{Finding, Severity};
+use crate::report::{
+    Finding, FindingLabel, FindingLabelKind, FindingNote, FindingNoteKind, Severity,
+};
 use crate::rules::{Rule, RuleBackend, RuleContext, RuleFamily, RuleInfo};
 use crate::span::{Location, Span};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -101,6 +103,16 @@ impl Visitor<'_> {
             evidence: None,
             confidence: None,
             tags: vec!["paths".to_string()],
+            labels: vec![FindingLabel {
+                kind: FindingLabelKind::Primary,
+                span: Span::from_pm_span(self.file_path, span),
+                message: Some(format!("{kind} path literal")),
+            }],
+            notes: vec![FindingNote {
+                kind: FindingNoteKind::Help,
+                message: "Prefer relative paths or build paths via `PathBuf` at runtime."
+                    .to_string(),
+            }],
             fixes: Vec::new(),
         });
     }
@@ -115,12 +127,7 @@ impl<'ast> Visit<'ast> for Visitor<'_> {
 
 fn absolute_kind(s: &str) -> Option<&'static str> {
     if s.starts_with('/') {
-        // Avoid false positives for common Rust comment/doc markers that show up as string literals
-        // (e.g. code that checks `trimmed.starts_with("//!")`).
-        if s.starts_with("//") || s.starts_with("/*") {
-            return None;
-        }
-        if s.trim_start_matches('/').is_empty() {
+        if is_non_filesystem_unix_literal(s) {
             return None;
         }
         return Some("unix");
@@ -145,6 +152,36 @@ fn absolute_kind(s: &str) -> Option<&'static str> {
     None
 }
 
+fn is_non_filesystem_unix_literal(value: &str) -> bool {
+    if value.starts_with("//") || value.starts_with("/*") {
+        return true;
+    }
+    if value.trim_start_matches('/').is_empty() {
+        return true;
+    }
+    if value.contains("://")
+        || value.starts_with("/api/")
+        || value.starts_with("/graphql")
+        || value.starts_with("/oauth/")
+        || value.starts_with("/v1/")
+        || value.starts_with("/v2/")
+        || value.starts_with("/:")
+    {
+        return true;
+    }
+    if value.contains("/{")
+        || value.contains("/:")
+        || value.contains('?')
+        || value.contains('#')
+        || value.starts_with("^/")
+        || value.ends_with("/$")
+    {
+        return true;
+    }
+
+    false
+}
+
 fn scan_line_comments(
     file_path: &Path,
     text: &str,
@@ -159,10 +196,11 @@ fn scan_line_comments(
             continue;
         }
         for part in trimmed.split_whitespace() {
-            if absolute_kind(part).is_none() {
+            let candidate = trim_comment_punctuation(part);
+            if absolute_kind(candidate).is_none() {
                 continue;
             }
-            if allow_globs.is_match(part) || allow_regex.is_match(part) {
+            if allow_globs.is_match(candidate) || allow_regex.is_match(candidate) {
                 continue;
             }
             out.emit(Finding {
@@ -170,7 +208,7 @@ fn scan_line_comments(
                 family: Some(AbsoluteFilesystemPathsRule::static_info().family),
                 engine: Some(AbsoluteFilesystemPathsRule::static_info().backend),
                 severity,
-                message: format!("absolute filesystem path in comment: {part}"),
+                message: format!("absolute filesystem path in comment: {candidate}"),
                 primary: Some(Span::new(
                     file_path,
                     Location {
@@ -187,10 +225,17 @@ fn scan_line_comments(
                 evidence: None,
                 confidence: None,
                 tags: vec!["paths".to_string(), "comments".to_string()],
+                labels: Vec::new(),
+                notes: Vec::new(),
                 fixes: Vec::new(),
             });
         }
     }
+}
+
+fn trim_comment_punctuation(part: &str) -> &str {
+    part.trim_matches(|ch: char| matches!(ch, '`' | '"' | '\'' | ',' | '.' | ';' | ')' | '('))
+        .trim_end_matches(':')
 }
 
 fn build_allow_globs(patterns: &[String]) -> GlobSet {

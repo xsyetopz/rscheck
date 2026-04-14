@@ -80,6 +80,8 @@ impl Rule for DuplicateTypesAliasCandidateRule {
                     evidence: None,
                     confidence: None,
                     tags: vec!["types".to_string()],
+                    labels: Vec::new(),
+                    notes: Vec::new(),
                     fixes: Vec::new(),
                 });
             }

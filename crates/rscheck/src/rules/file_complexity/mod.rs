@@ -88,6 +88,8 @@ impl Rule for FileComplexityRule {
                             evidence: Some(format_per_fn(&v.per_fn)),
                             confidence: None,
                             tags: vec!["complexity".to_string()],
+                            labels: Vec::new(),
+                            notes: Vec::new(),
                             fixes: Vec::new(),
                         });
                     }
@@ -107,6 +109,8 @@ impl Rule for FileComplexityRule {
                             evidence: None,
                             confidence: None,
                             tags: vec!["size".to_string()],
+                            labels: Vec::new(),
+                            notes: Vec::new(),
                             fixes: Vec::new(),
                         });
                     }
@@ -128,6 +132,8 @@ impl Rule for FileComplexityRule {
                             evidence: None,
                             confidence: None,
                             tags: vec!["size".to_string()],
+                            labels: Vec::new(),
+                            notes: Vec::new(),
                             fixes: Vec::new(),
                         });
                     }

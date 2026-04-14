@@ -30,6 +30,35 @@ pub enum FixSafety {
     Unsafe,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingLabelKind {
+    Primary,
+    Secondary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FindingLabel {
+    pub kind: FindingLabelKind,
+    pub span: Span,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingNoteKind {
+    Note,
+    Help,
+    Info,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FindingNote {
+    pub kind: FindingNoteKind,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextEdit {
     pub file: String,
@@ -69,6 +98,10 @@ pub struct Finding {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<FindingLabel>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<FindingNote>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fixes: Vec<Fix>,
 }
 
@@ -87,6 +120,21 @@ pub struct RuleCatalogEntry {
 pub struct AdapterRun {
     pub name: String,
     pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toolchain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolchainSummary {
+    pub requested: String,
+    pub resolved: String,
+    pub semantic: String,
+    #[serde(default)]
+    pub nightly_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -95,6 +143,10 @@ pub struct RunSummary {
     pub engine_used: Vec<RuleBackend>,
     #[serde(default)]
     pub semantic_backend_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_backend_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toolchain: Option<ToolchainSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped_rules: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

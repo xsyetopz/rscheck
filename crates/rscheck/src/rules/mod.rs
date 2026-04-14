@@ -7,6 +7,7 @@ mod file_complexity;
 mod layer_direction;
 mod public_api_errors;
 mod srp_heuristic;
+mod use_tree_path;
 
 use crate::analysis::Workspace;
 use crate::config::{Level, Policy, RuleSettings};

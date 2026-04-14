@@ -1,5 +1,8 @@
 use cargo_metadata::{Message, diagnostic::DiagnosticLevel};
-use rscheck::report::{Finding, Fix, FixSafety, Severity, TextEdit};
+use rscheck::report::{
+    Finding, FindingLabel, FindingLabelKind, FindingNote, FindingNoteKind, Fix, FixSafety,
+    Severity, TextEdit,
+};
 use rscheck::rules::RuleBackend;
 use rscheck::span::{Location, Span};
 use std::io::{self, BufReader};
@@ -18,10 +21,14 @@ pub enum CargoError {
 
 pub fn run_clippy(
     workspace_root: &PathBuf,
+    toolchain: Option<&str>,
     extra_args: &[String],
 ) -> Result<Vec<Finding>, CargoError> {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(workspace_root);
+    if let Some(toolchain) = toolchain {
+        cmd.arg(toolchain);
+    }
     cmd.arg("clippy")
         .arg("--workspace")
         .arg("--message-format=json")
@@ -69,20 +76,19 @@ fn diagnostic_to_finding(diag: &cargo_metadata::diagnostic::Diagnostic) -> Optio
         _ => Severity::Warn,
     };
 
-    let primary = diag.spans.iter().find(|s| s.is_primary).map(|s| {
-        let file = PathBuf::from(&s.file_name);
-        Span::new(
-            &file,
-            Location {
-                line: s.line_start as u32,
-                column: s.column_start as u32,
-            },
-            Location {
-                line: s.line_end as u32,
-                column: s.column_end as u32,
-            },
-        )
-    });
+    let primary = diag
+        .spans
+        .iter()
+        .find(|s| s.is_primary)
+        .map(span_to_report_span);
+    let secondary: Vec<_> = diag
+        .spans
+        .iter()
+        .filter(|span| !span.is_primary)
+        .map(span_to_report_span)
+        .collect();
+    let labels = collect_labels(diag);
+    let notes = collect_notes(diag);
 
     let mut fixes = Vec::new();
     for (idx, span) in diag.spans.iter().enumerate() {
@@ -122,11 +128,76 @@ fn diagnostic_to_finding(diag: &cargo_metadata::diagnostic::Diagnostic) -> Optio
         severity,
         message: diag.message.clone(),
         primary,
-        secondary: Vec::new(),
+        secondary,
         help: None,
         evidence: None,
         confidence: None,
         tags: vec!["clippy".to_string()],
+        labels,
+        notes,
         fixes,
     })
+}
+
+fn span_to_report_span(span: &cargo_metadata::diagnostic::DiagnosticSpan) -> Span {
+    let file = PathBuf::from(&span.file_name);
+    Span::new(
+        &file,
+        Location {
+            line: span.line_start as u32,
+            column: span.column_start as u32,
+        },
+        Location {
+            line: span.line_end as u32,
+            column: span.column_end as u32,
+        },
+    )
+}
+
+fn collect_labels(diag: &cargo_metadata::diagnostic::Diagnostic) -> Vec<FindingLabel> {
+    let mut labels = Vec::new();
+    for span in &diag.spans {
+        labels.push(FindingLabel {
+            kind: if span.is_primary {
+                FindingLabelKind::Primary
+            } else {
+                FindingLabelKind::Secondary
+            },
+            span: span_to_report_span(span),
+            message: span.label.clone(),
+        });
+    }
+    for child in &diag.children {
+        for span in &child.spans {
+            labels.push(FindingLabel {
+                kind: if span.is_primary {
+                    FindingLabelKind::Primary
+                } else {
+                    FindingLabelKind::Secondary
+                },
+                span: span_to_report_span(span),
+                message: span.label.clone().or_else(|| Some(child.message.clone())),
+            });
+        }
+    }
+    labels
+}
+
+fn collect_notes(diag: &cargo_metadata::diagnostic::Diagnostic) -> Vec<FindingNote> {
+    let mut notes = Vec::new();
+    for child in &diag.children {
+        notes.push(FindingNote {
+            kind: map_note_kind(child.level),
+            message: child.message.clone(),
+        });
+    }
+    notes
+}
+
+fn map_note_kind(level: DiagnosticLevel) -> FindingNoteKind {
+    match level {
+        DiagnosticLevel::Help => FindingNoteKind::Help,
+        DiagnosticLevel::Note | DiagnosticLevel::FailureNote => FindingNoteKind::Note,
+        _ => FindingNoteKind::Info,
+    }
 }

@@ -1,11 +1,13 @@
 use crate::analysis::Workspace;
 use crate::config::{LayerDirectionConfig, LayerRuleSet};
 use crate::emit::Emitter;
-use crate::report::Finding;
+use crate::report::{Finding, Severity};
+use crate::rules::use_tree_path::flatten as flatten_use_tree_path;
 use crate::rules::{Rule, RuleBackend, RuleContext, RuleFamily, RuleInfo};
 use crate::span::Span;
 use globset::{Glob, GlobSetBuilder};
 use quote::ToTokens;
+use std::path::Path;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
@@ -60,10 +62,10 @@ impl Rule for LayerDirectionRule {
 }
 
 struct LayerVisitor<'a> {
-    file: &'a std::path::Path,
+    file: &'a Path,
     current: &'a LayerRuleSet,
     layers: &'a [LayerRuleSet],
-    severity: crate::report::Severity,
+    severity: Severity,
     out: &'a mut dyn Emitter,
 }
 
@@ -101,6 +103,8 @@ impl LayerVisitor<'_> {
             evidence: None,
             confidence: None,
             tags: vec!["architecture".to_string(), "layers".to_string()],
+            labels: Vec::new(),
+            notes: Vec::new(),
             fixes: Vec::new(),
         });
     }
@@ -115,7 +119,7 @@ impl<'ast> Visit<'ast> for LayerVisitor<'_> {
     }
 }
 
-fn match_layer<'a>(layers: &'a [LayerRuleSet], path: &std::path::Path) -> Option<&'a LayerRuleSet> {
+fn match_layer<'a>(layers: &'a [LayerRuleSet], path: &Path) -> Option<&'a LayerRuleSet> {
     let candidate = path.to_string_lossy();
     layers
         .iter()
@@ -137,18 +141,7 @@ fn glob_matches(patterns: &[String], candidate: &str) -> bool {
 }
 
 fn use_tree_path(tree: &syn::UseTree) -> Option<syn::Path> {
-    match tree {
-        syn::UseTree::Path(path) => {
-            let mut segments = syn::punctuated::Punctuated::new();
-            segments.push(path.ident.clone().into());
-            let mut tail = use_tree_path(&path.tree)?;
-            segments.extend(tail.segments);
-            tail.segments = segments;
-            Some(tail)
-        }
-        syn::UseTree::Name(name) => Some(syn::Path::from(name.ident.clone())),
-        _ => None,
-    }
+    flatten_use_tree_path(tree)
 }
 
 #[cfg(test)]

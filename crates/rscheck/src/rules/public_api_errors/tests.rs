@@ -1,34 +1,35 @@
-use crate::analysis::Workspace;
-use crate::config::{Level, Policy, RuleSettings};
-use crate::emit::ReportEmitter;
-use crate::rules::{PublicApiErrorsRule, Rule, RuleContext};
-use std::fs;
+use crate::config::Level;
+use crate::rules::PublicApiErrorsRule;
+use crate::test_support::run_single_file_rule;
 
 #[test]
 fn flags_disallowed_public_error_type() {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("lib.rs");
-    fs::write(
-        &file,
-        "pub fn run() -> Result<(), anyhow::Error> { unimplemented!() }\n",
-    )
-    .unwrap();
-
-    let ws = Workspace::new(dir.path().to_path_buf())
-        .load_files(&Policy::default())
-        .unwrap();
-    let mut policy = Policy::default();
-    policy.rules.insert(
-        "design.public_api_errors".to_string(),
-        RuleSettings {
-            level: Some(Level::Deny),
-            options: toml::toml! {
-                allowed_error_types = ["crate::Error"]
-            },
+    let findings = run_single_file_rule(
+        &PublicApiErrorsRule,
+        "design.public_api_errors",
+        Level::Deny,
+        toml::toml! {
+            allowed_error_types = ["crate::Error"]
         },
+        "pub fn run() -> Result<(), anyhow::Error> { Err(anyhow::Error::msg(\"boom\")) }\n",
     );
+    assert_eq!(findings.len(), 1);
+}
 
-    let mut emitter = ReportEmitter::new();
-    PublicApiErrorsRule.run(&ws, &RuleContext { policy: &policy }, &mut emitter);
-    assert_eq!(emitter.findings.len(), 1);
+#[test]
+fn does_not_treat_prefix_match_as_allowed() {
+    let findings = run_single_file_rule(
+        &PublicApiErrorsRule,
+        "design.public_api_errors",
+        Level::Deny,
+        toml::toml! {
+            allowed_error_types = ["crate::Error"]
+        },
+        r#"
+pub fn run() -> Result<(), crate::Errorish> {
+    panic!()
+}
+"#,
+    );
+    assert_eq!(findings.len(), 1);
 }

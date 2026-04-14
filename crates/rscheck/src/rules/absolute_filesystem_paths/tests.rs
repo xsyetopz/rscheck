@@ -1,28 +1,14 @@
 use super::AbsoluteFilesystemPathsRule;
-use crate::analysis::{SourceFile, Workspace};
-use crate::config::{Level, Policy, RuleSettings};
-use crate::emit::ReportEmitter;
-use crate::rules::{Rule, RuleContext};
-use std::path::PathBuf;
-
-fn ws_with_single_file(code: &str) -> Workspace {
-    let root = PathBuf::from(".");
-    let path = root.join("rscheck_test.rs");
-    let ast = syn::parse_file(code).ok();
-    Workspace {
-        root,
-        files: vec![SourceFile {
-            path,
-            text: code.to_string(),
-            ast,
-            parse_error: None,
-        }],
-    }
-}
+use crate::config::Level;
+use crate::test_support::run_single_file_rule;
 
 #[test]
 fn flags_unix_absolute_path_in_literal() {
-    let ws = ws_with_single_file(
+    let findings = run_single_file_rule(
+        &AbsoluteFilesystemPathsRule,
+        "portability.absolute_literal_paths",
+        Level::Warn,
+        toml::Table::new(),
         r#"
 fn f() {
     let _p = "/etc/passwd";
@@ -30,42 +16,32 @@ fn f() {
 }
 "#,
     );
-
-    let mut cfg = Policy::default();
-    cfg.rules.insert(
-        "portability.absolute_literal_paths".to_string(),
-        RuleSettings {
-            level: Some(Level::Warn),
-            options: toml::Table::new(),
-        },
-    );
-    let mut emitter = ReportEmitter::new();
-    AbsoluteFilesystemPathsRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
-
-    assert_eq!(emitter.findings.len(), 1);
-    assert!(emitter.findings[0].message.contains("/etc/passwd"));
+    assert_eq!(findings.len(), 1);
+    assert!(findings[0].message.contains("/etc/passwd"));
 }
 
 #[test]
-fn does_not_flag_comment_marker_string_literals() {
-    let ws = ws_with_single_file(
+fn does_not_flag_safe_literal_patterns() {
+    for code in [
         r#"
 fn f(line: &str) -> bool {
     line.trim_start().starts_with("//!") || line.trim_start().starts_with("/*!")
 }
+        "#,
+        r#"
+fn routes() {
+    let _api = "/api/v1/users";
+    let _templated = "/users/{id}";
+}
 "#,
-    );
-
-    let mut cfg = Policy::default();
-    cfg.rules.insert(
-        "portability.absolute_literal_paths".to_string(),
-        RuleSettings {
-            level: Some(Level::Warn),
-            options: toml::Table::new(),
-        },
-    );
-    let mut emitter = ReportEmitter::new();
-    AbsoluteFilesystemPathsRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
-
-    assert!(emitter.findings.is_empty());
+    ] {
+        let findings = run_single_file_rule(
+            &AbsoluteFilesystemPathsRule,
+            "portability.absolute_literal_paths",
+            Level::Warn,
+            toml::Table::new(),
+            code,
+        );
+        assert!(findings.is_empty());
+    }
 }

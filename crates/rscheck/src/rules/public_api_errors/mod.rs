@@ -1,6 +1,7 @@
 use crate::analysis::Workspace;
 use crate::config::PublicApiErrorsConfig;
 use crate::emit::Emitter;
+use crate::path_pattern::matches_path_prefix;
 use crate::report::Finding;
 use crate::rules::{Rule, RuleBackend, RuleContext, RuleFamily, RuleInfo};
 use crate::span::Span;
@@ -57,7 +58,7 @@ impl Rule for PublicApiErrorsRule {
                 if cfg
                     .allowed_error_types
                     .iter()
-                    .any(|allowed| error_ty.starts_with(allowed))
+                    .any(|allowed| matches_path_prefix(&error_ty, allowed))
                 {
                     continue;
                 }
@@ -76,6 +77,8 @@ impl Rule for PublicApiErrorsRule {
                     evidence: None,
                     confidence: None,
                     tags: vec!["api".to_string(), "errors".to_string()],
+                    labels: Vec::new(),
+                    notes: Vec::new(),
                     fixes: Vec::new(),
                 });
             }

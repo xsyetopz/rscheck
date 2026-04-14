@@ -48,6 +48,25 @@ pub enum EngineMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
+pub enum ToolchainMode {
+    #[default]
+    Current,
+    Auto,
+    Nightly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AdapterToolchainMode {
+    #[default]
+    Inherit,
+    Current,
+    Auto,
+    Nightly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
     #[default]
     Text,
@@ -56,10 +75,30 @@ pub enum OutputFormat {
     Html,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineConfig {
     #[serde(default)]
     pub semantic: EngineMode,
+    #[serde(default)]
+    pub toolchain: ToolchainMode,
+    #[serde(default = "EngineConfig::default_nightly_toolchain")]
+    pub nightly_toolchain: String,
+}
+
+impl EngineConfig {
+    fn default_nightly_toolchain() -> String {
+        "nightly".to_string()
+    }
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            semantic: EngineMode::Auto,
+            toolchain: ToolchainMode::Current,
+            nightly_toolchain: Self::default_nightly_toolchain(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +142,8 @@ pub struct ClippyAdapterConfig {
     pub enabled: bool,
     #[serde(default)]
     pub args: Vec<String>,
+    #[serde(default)]
+    pub toolchain: AdapterToolchainMode,
 }
 
 impl ClippyAdapterConfig {
@@ -116,6 +157,7 @@ impl Default for ClippyAdapterConfig {
         Self {
             enabled: true,
             args: Vec::new(),
+            toolchain: AdapterToolchainMode::Inherit,
         }
     }
 }

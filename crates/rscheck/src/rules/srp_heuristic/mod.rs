@@ -65,6 +65,8 @@ impl Rule for SrpHeuristicRule {
                     evidence: None,
                     confidence: None,
                     tags: vec!["design".to_string()],
+                    labels: Vec::new(),
+                    notes: Vec::new(),
                     fixes: Vec::new(),
                 });
             }
