@@ -1,5 +1,5 @@
-use rscheck::config::{ConfigError, Policy};
-use rscheck::rules;
+use crate::config::{ConfigError, Policy};
+use crate::rules;
 use std::fs;
 use std::path::{Path, PathBuf};
 

@@ -1,4 +1,4 @@
-use rscheck::report::{Report, Severity};
+use crate::report::{Report, Severity};
 
 pub fn to_html(report: &Report) -> String {
     let mut html = String::new();

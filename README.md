@@ -10,15 +10,20 @@ Site: <https://xsyetopz.github.io/rscheck/>
 
 ## Install
 
-This repo is not published on crates.io.
-
 ```bash
-cargo install --git https://github.com/xsyetopz/rscheck --locked rscheck-cli
+cargo install rscheck-cli
 ```
 
 That installs:
 - `rscheck`
 - `cargo-rscheck`
+
+Git install still works if you want the repo head instead of the published
+crate:
+
+```bash
+cargo install --git https://github.com/xsyetopz/rscheck --locked rscheck-cli
+```
 
 ## Check A Workspace
 
@@ -147,6 +152,8 @@ Current rules include:
 
 ## Use As A Library
 
+The library crates are not published on crates.io yet.
+
 ```toml
 [dependencies]
 rscheck = { git = "https://github.com/xsyetopz/rscheck" }
@@ -156,13 +163,35 @@ rscheck = { git = "https://github.com/xsyetopz/rscheck" }
 use rscheck::analysis::Workspace;
 use rscheck::config::Policy;
 use rscheck::runner::Runner;
+use std::env;
 
-let root = std::env::current_dir().unwrap();
+let root = env::current_dir().unwrap();
 let policy = Policy::default();
 let ws = Workspace::new(root).load_files(&policy).unwrap();
 let report = Runner::run(&ws, &policy).unwrap();
 println!("{:#?}", report.worst_severity());
 ```
+
+## Release
+
+Manual release flow for the `rscheck-cli` package:
+
+```bash
+cargo test -p rscheck-cli
+cargo package --list -p rscheck-cli
+cargo publish --dry-run -p rscheck-cli
+cargo publish -p rscheck-cli
+```
+
+Verify the published package in a fresh environment:
+
+```bash
+cargo install rscheck-cli --version <version>
+rscheck --help
+cargo-rscheck --help
+```
+
+Trusted publishing can be added later once the manual crates.io flow is settled.
 
 ## Local Site
 

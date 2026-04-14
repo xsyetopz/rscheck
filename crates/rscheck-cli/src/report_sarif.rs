@@ -1,4 +1,4 @@
-use rscheck::report::{Finding, Report, Severity};
+use crate::report::{Finding, Report, Severity};
 use serde::Serialize;
 use std::collections::BTreeSet;
 

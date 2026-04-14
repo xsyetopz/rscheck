@@ -1,20 +1,32 @@
+pub mod analysis;
 mod cargo_clippy;
+pub mod config;
 mod config_file;
+pub mod emit;
+pub mod fix;
 mod fix_apply;
+mod path_pattern;
+pub mod policy;
+pub mod report;
 mod report_html;
 mod report_sarif;
+pub mod rules;
+pub mod runner;
+pub mod semantic;
+pub mod span;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod text_report;
 mod toolchain;
 
+use crate::analysis::Workspace;
+use crate::config::{OutputFormat, Policy, ToolchainMode};
+use crate::report::{AdapterRun, Report};
+use crate::runner::Runner;
 use cargo_clippy::run_clippy;
 use clap::Parser;
 use config_file::{default_config_path, load_from, workspace_root, write_default_config};
 use fix_apply::{ApplyError, PlannedEdits, apply_planned_edits, plan_edits, print_dry_run};
-use rscheck::analysis::Workspace;
-use rscheck::config::{OutputFormat, Policy, ToolchainMode};
-use rscheck::report::{AdapterRun, Report};
-use rscheck::rules;
-use rscheck::runner::Runner;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode as ProcessExitCode;
 use std::{fs, io};

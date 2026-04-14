@@ -1,5 +1,5 @@
-use rscheck::fix::apply_text_edits;
-use rscheck::report::{FixSafety, Report, TextEdit};
+use crate::fix::apply_text_edits;
+use crate::report::{FixSafety, Report, TextEdit};
 use similar::TextDiff;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -14,7 +14,7 @@ pub enum ApplyError {
     #[error("failed to apply edits for file: {path}")]
     Apply {
         path: String,
-        source: rscheck::fix::FixError,
+        source: crate::fix::FixError,
     },
 }
 

@@ -1,8 +1,8 @@
-use annotate_snippets::{AnnotationKind, Group, Level, Renderer, Snippet};
-use rscheck::fix::line_col_to_byte_offset;
-use rscheck::report::{
+use crate::fix::line_col_to_byte_offset;
+use crate::report::{
     Finding, FindingLabel, FindingLabelKind, FindingNoteKind, FixSafety, Report, Severity,
 };
+use annotate_snippets::{AnnotationKind, Group, Level, Renderer, Snippet};
 use std::collections::BTreeMap;
 use std::env::current_dir;
 use std::fs;
@@ -249,8 +249,8 @@ fn display_path(cwd: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::render_text_report;
-    use rscheck::report::{Finding, FindingLabel, FindingLabelKind, Report, Severity};
-    use rscheck::span::{Location, Span};
+    use crate::report::{Finding, FindingLabel, FindingLabelKind, Report, Severity};
+    use crate::span::{Location, Span};
 
     #[test]
     fn renders_fallback_when_source_missing() {

@@ -1,10 +1,10 @@
-use cargo_metadata::{Message, diagnostic::DiagnosticLevel};
-use rscheck::report::{
+use crate::report::{
     Finding, FindingLabel, FindingLabelKind, FindingNote, FindingNoteKind, Fix, FixSafety,
     Severity, TextEdit,
 };
-use rscheck::rules::RuleBackend;
-use rscheck::span::{Location, Span};
+use crate::rules::RuleBackend;
+use crate::span::{Location, Span};
+use cargo_metadata::{Message, diagnostic::DiagnosticLevel};
 use std::io::{self, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};

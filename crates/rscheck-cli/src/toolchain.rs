@@ -1,6 +1,6 @@
-use rscheck::config::{AdapterToolchainMode, EngineMode, Policy, ToolchainMode};
-use rscheck::report::ToolchainSummary;
-use rscheck::semantic::SemanticBackendStatus;
+use crate::config::{AdapterToolchainMode, EngineMode, Policy, ToolchainMode};
+use crate::report::ToolchainSummary;
+use crate::semantic::SemanticBackendStatus;
 use std::io;
 use std::process::Command;
 
