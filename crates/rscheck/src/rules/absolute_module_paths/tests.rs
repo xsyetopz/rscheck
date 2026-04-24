@@ -50,31 +50,36 @@ fn f() {
     let mut emitter = ReportEmitter::new();
     AbsoluteModulePathsRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
 
-    assert!(emitter.findings.iter().any(|f| f.message.contains("::std")));
     assert!(
         emitter
             .findings
             .iter()
-            .any(|f| f.message.contains("std::path::Path"))
+            .any(|f| f.message().contains("::std"))
+    );
+    assert!(
+        emitter
+            .findings
+            .iter()
+            .any(|f| f.message().contains("std::path::Path"))
     );
 
     assert!(
         !emitter
             .findings
             .iter()
-            .any(|f| f.message.contains("crate::MY_CONST"))
+            .any(|f| f.message().contains("crate::MY_CONST"))
     );
     assert!(
         !emitter
             .findings
             .iter()
-            .any(|f| f.message.contains("crate::static_function"))
+            .any(|f| f.message().contains("crate::static_function"))
     );
     assert!(
         !emitter
             .findings
             .iter()
-            .any(|f| f.message.contains("crate::my_macro"))
+            .any(|f| f.message().contains("crate::my_macro"))
     );
 }
 
@@ -101,11 +106,11 @@ fn f() {
     let finding = emitter
         .findings
         .iter()
-        .find(|f| f.message.contains("std::path::PathBuf"))
+        .find(|f| f.message().contains("std::path::PathBuf"))
         .expect("expected PathBuf finding");
-    assert!(!finding.fixes.is_empty());
+    assert!(!finding.fixes().is_empty());
 
-    let fix = &finding.fixes[0];
+    let fix = &finding.fixes()[0];
     let new_code = apply_text_edits(code, &fix.edits).expect("apply edits");
     assert!(new_code.contains("use std::path::PathBuf;"));
     assert!(new_code.contains("let _p: PathBuf"));
@@ -136,7 +141,7 @@ fn f() {
     let finding = emitter
         .findings
         .iter()
-        .find(|f| f.message.contains("std::path::PathBuf"))
+        .find(|f| f.message().contains("std::path::PathBuf"))
         .expect("expected PathBuf finding");
-    assert_eq!(finding.fixes[0].safety, crate::report::FixSafety::Unsafe);
+    assert_eq!(finding.fixes()[0].safety, crate::report::FixSafety::Unsafe);
 }

@@ -3,19 +3,21 @@ rscheck init
 rscheck check --format text`;
 
 export const quickStartSteps = [
-	"Run rscheck init to create a v2 policy file.",
+	"Run rscheck init to create a v3 policy file.",
 	"Run rscheck check --format text.",
 	"Enable [adapters.clippy] when you want Clippy findings in the same report.",
-	'Set engine.semantic = "auto", "require", or "off" to match the backend you expect.',
+	'Set engine.toolchain = "stable", "nightly", or "auto" and engine.semantic to match the backend you expect.',
 ];
 
-export const policySnippet = `version = 2
+export const policySnippet = `version = 3
 
 [engine]
 semantic = "auto"
+toolchain = "stable"
 
 [adapters.clippy]
 enabled = true
+toolchain = "inherit"
 
 [rules."architecture.qualified_module_paths"]
 level = "deny"
@@ -24,6 +26,12 @@ level = "deny"
 level = "warn"
 max_file = 220
 max_fn = 30
+
+[rules."testing.external_test_modules"]
+level = "deny"
+
+[rules."design.naming_policy"]
+level = "warn"
 
 [[scope]]
 include = ["crates/rscheck-cli/**"]
@@ -46,7 +54,7 @@ export const families = [
 		points: [
 			"public API error contracts",
 			"repeated type alias candidates",
-			"construction and export constraints",
+			"naming, god-object, and API error constraints",
 		],
 	},
 	{
@@ -54,7 +62,7 @@ export const families = [
 		points: [
 			"file and function complexity thresholds",
 			"duplicate logic detection",
-			"responsibility split heuristics",
+			"responsibility split and test layout checks",
 		],
 	},
 ];

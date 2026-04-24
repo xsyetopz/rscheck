@@ -1,13 +1,14 @@
-use crate::report::{
+use crate::toolchain::ToolCommand;
+use cargo_metadata::{Message, diagnostic::DiagnosticLevel};
+use rscheck::report::{
     Finding, FindingLabel, FindingLabelKind, FindingNote, FindingNoteKind, Fix, FixSafety,
     Severity, TextEdit,
 };
-use crate::rules::RuleBackend;
-use crate::span::{Location, Span};
-use cargo_metadata::{Message, diagnostic::DiagnosticLevel};
+use rscheck::rules::RuleBackend;
+use rscheck::span::{Location, Span};
 use std::io::{self, BufReader};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CargoError {
@@ -21,14 +22,11 @@ pub enum CargoError {
 
 pub fn run_clippy(
     workspace_root: &PathBuf,
-    toolchain: Option<&str>,
+    cargo_command: &ToolCommand,
     extra_args: &[String],
 ) -> Result<Vec<Finding>, CargoError> {
-    let mut cmd = Command::new("cargo");
+    let mut cmd = cargo_command.command();
     cmd.current_dir(workspace_root);
-    if let Some(toolchain) = toolchain {
-        cmd.arg(toolchain);
-    }
     cmd.arg("clippy")
         .arg("--workspace")
         .arg("--message-format=json")
@@ -95,48 +93,55 @@ fn diagnostic_to_finding(diag: &cargo_metadata::diagnostic::Diagnostic) -> Optio
         let Some(repl) = &span.suggested_replacement else {
             continue;
         };
-        let safety = match span.suggestion_applicability {
-            Some(cargo_metadata::diagnostic::Applicability::MachineApplicable) => FixSafety::Safe,
-            _ => FixSafety::Unsafe,
-        };
-        fixes.push(Fix {
-            id: format!(
-                "{}::clippy_suggestion::{idx}",
-                diag.code.as_ref().map_or("clippy", |c| c.code.as_str())
-            ),
-            safety,
-            message: span
-                .label
-                .clone()
-                .unwrap_or_else(|| "apply suggestion".to_string()),
-            edits: vec![TextEdit {
-                file: span.file_name.clone(),
-                byte_start: span.byte_start,
-                byte_end: span.byte_end,
-                replacement: repl.clone(),
-            }],
-        });
+        fixes.push(clippy_fix(diag, span, repl, idx));
     }
 
-    Some(Finding {
-        rule_id: diag
-            .code
+    let mut finding = Finding::new(clippy_rule_id(diag), severity, Clone::clone(&diag.message))
+        .with_backend(RuleBackend::Adapter)
+        .with_secondary(secondary)
+        .with_tags(Vec::from([String::from("clippy")]))
+        .with_labels(labels)
+        .with_notes(notes)
+        .with_fixes(fixes);
+    if let Some(primary) = primary {
+        finding = finding.with_primary(primary);
+    }
+    Some(finding)
+}
+
+fn clippy_rule_id(diag: &cargo_metadata::diagnostic::Diagnostic) -> String {
+    diag.code
+        .as_ref()
+        .map_or_else(|| String::from("clippy"), |c| Clone::clone(&c.code))
+}
+
+fn clippy_fix(
+    diag: &cargo_metadata::diagnostic::Diagnostic,
+    span: &cargo_metadata::diagnostic::DiagnosticSpan,
+    replacement: &str,
+    idx: usize,
+) -> Fix {
+    let safety = match span.suggestion_applicability {
+        Some(cargo_metadata::diagnostic::Applicability::MachineApplicable) => FixSafety::Safe,
+        _ => FixSafety::Unsafe,
+    };
+    Fix {
+        id: format!(
+            "{}::clippy_suggestion::{idx}",
+            diag.code.as_ref().map_or("clippy", |c| c.code.as_str())
+        ),
+        safety,
+        message: span
+            .label
             .as_ref()
-            .map_or_else(|| "clippy".to_string(), |c| c.code.clone()),
-        family: None,
-        engine: Some(RuleBackend::Adapter),
-        severity,
-        message: diag.message.clone(),
-        primary,
-        secondary,
-        help: None,
-        evidence: None,
-        confidence: None,
-        tags: vec!["clippy".to_string()],
-        labels,
-        notes,
-        fixes,
-    })
+            .map_or_else(|| String::from("apply suggestion"), Clone::clone),
+        edits: Vec::from([TextEdit {
+            file: Clone::clone(&span.file_name),
+            byte_start: span.byte_start,
+            byte_end: span.byte_end,
+            replacement: String::from(replacement),
+        }]),
+    }
 }
 
 fn span_to_report_span(span: &cargo_metadata::diagnostic::DiagnosticSpan) -> Span {
@@ -157,41 +162,59 @@ fn span_to_report_span(span: &cargo_metadata::diagnostic::DiagnosticSpan) -> Spa
 fn collect_labels(diag: &cargo_metadata::diagnostic::Diagnostic) -> Vec<FindingLabel> {
     let mut labels = Vec::new();
     for span in &diag.spans {
-        labels.push(FindingLabel {
-            kind: if span.is_primary {
-                FindingLabelKind::Primary
-            } else {
-                FindingLabelKind::Secondary
-            },
-            span: span_to_report_span(span),
-            message: span.label.clone(),
-        });
+        labels.push(label_from_span(span));
     }
     for child in &diag.children {
         for span in &child.spans {
-            labels.push(FindingLabel {
-                kind: if span.is_primary {
-                    FindingLabelKind::Primary
-                } else {
-                    FindingLabelKind::Secondary
-                },
-                span: span_to_report_span(span),
-                message: span.label.clone().or_else(|| Some(child.message.clone())),
-            });
+            labels.push(label_from_child(span, child));
         }
     }
     labels
 }
 
+fn label_from_span(span: &cargo_metadata::diagnostic::DiagnosticSpan) -> FindingLabel {
+    FindingLabel {
+        kind: label_kind(span),
+        span: span_to_report_span(span),
+        message: Clone::clone(&span.label),
+    }
+}
+
+fn label_from_child(
+    span: &cargo_metadata::diagnostic::DiagnosticSpan,
+    child: &cargo_metadata::diagnostic::Diagnostic,
+) -> FindingLabel {
+    FindingLabel {
+        kind: label_kind(span),
+        span: span_to_report_span(span),
+        message: span.label.as_ref().map_or_else(
+            || Some(Clone::clone(&child.message)),
+            |message| Some(Clone::clone(message)),
+        ),
+    }
+}
+
+fn label_kind(span: &cargo_metadata::diagnostic::DiagnosticSpan) -> FindingLabelKind {
+    if span.is_primary {
+        FindingLabelKind::Primary
+    } else {
+        FindingLabelKind::Secondary
+    }
+}
+
 fn collect_notes(diag: &cargo_metadata::diagnostic::Diagnostic) -> Vec<FindingNote> {
     let mut notes = Vec::new();
     for child in &diag.children {
-        notes.push(FindingNote {
-            kind: map_note_kind(child.level),
-            message: child.message.clone(),
-        });
+        notes.push(note_from_child(child));
     }
     notes
+}
+
+fn note_from_child(child: &cargo_metadata::diagnostic::Diagnostic) -> FindingNote {
+    FindingNote {
+        kind: map_note_kind(child.level),
+        message: Clone::clone(&child.message),
+    }
 }
 
 fn map_note_kind(level: DiagnosticLevel) -> FindingNoteKind {

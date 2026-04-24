@@ -1,4 +1,4 @@
-use crate::report::{Finding, Report, Severity};
+use rscheck::report::{Finding, Report, Severity};
 use serde::Serialize;
 use std::collections::BTreeSet;
 
@@ -84,7 +84,7 @@ pub fn to_sarif(report: &Report) -> SarifLog {
     let rules = if report.rule_catalog.is_empty() {
         let mut unique_rules: BTreeSet<String> = BTreeSet::new();
         for f in &report.findings {
-            unique_rules.insert(f.rule_id.clone());
+            unique_rules.insert(String::from(f.rule_id()));
         }
         unique_rules
             .iter()
@@ -121,20 +121,20 @@ pub fn to_sarif(report: &Report) -> SarifLog {
 
 fn finding_to_result(f: &Finding) -> ResultItem {
     ResultItem {
-        rule_id: f.rule_id.clone(),
-        level: match f.severity {
+        rule_id: String::from(f.rule_id()),
+        level: match f.severity() {
             Severity::Info => "note",
             Severity::Warn => "warning",
             Severity::Deny => "error",
         },
         message: Message {
-            text: f.message.clone(),
+            text: String::from(f.message()),
         },
-        locations: f.primary.as_ref().map(|span| {
-            vec![Location {
+        locations: f.primary().map(|span| {
+            Vec::from([Location {
                 physical_location: PhysicalLocation {
                     artifact_location: ArtifactLocation {
-                        uri: span.file.clone(),
+                        uri: Clone::clone(&span.file),
                     },
                     region: Region {
                         start_line: span.start.line,
@@ -143,7 +143,7 @@ fn finding_to_result(f: &Finding) -> ResultItem {
                         end_column: span.end.column,
                     },
                 },
-            }]
+            }])
         }),
     }
 }

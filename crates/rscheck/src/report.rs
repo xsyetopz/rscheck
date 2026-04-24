@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::Level;
-use crate::rules::{RuleBackend, RuleFamily};
+use crate::rules::{RuleBackend, RuleFamily, RuleInfo};
 use crate::span::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,31 +78,205 @@ pub struct Fix {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
+    #[serde(flatten)]
+    pub identity: FindingIdentity,
+    #[serde(flatten)]
+    pub diagnostic: FindingDiagnostic,
+    #[serde(flatten)]
+    pub location: FindingLocation,
+    #[serde(flatten)]
+    pub metadata: FindingMetadata,
+    #[serde(flatten)]
+    pub related: FindingRelated,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FindingIdentity {
     pub rule_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub family: Option<RuleFamily>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub engine: Option<RuleBackend>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FindingDiagnostic {
     pub severity: Severity,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FindingLocation {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary: Option<Span>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secondary: Vec<Span>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub help: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FindingMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FindingRelated {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<FindingLabel>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<FindingNote>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fixes: Vec<Fix>,
+}
+
+impl Finding {
+    pub fn new(rule_id: String, severity: Severity, message: String) -> Self {
+        Self {
+            identity: FindingIdentity {
+                rule_id,
+                family: None,
+                engine: None,
+            },
+            diagnostic: FindingDiagnostic {
+                severity,
+                message,
+                help: None,
+            },
+            location: FindingLocation::default(),
+            metadata: FindingMetadata::default(),
+            related: FindingRelated::default(),
+        }
+    }
+
+    pub fn from_rule(rule_info: RuleInfo, severity: Severity, message: String) -> Self {
+        Self::new(rule_info.id.to_string(), severity, message)
+            .with_engine(rule_info.family, rule_info.backend)
+    }
+
+    #[must_use]
+    pub fn with_engine(mut self, family: RuleFamily, backend: RuleBackend) -> Self {
+        self.identity.family = Some(family);
+        self.identity.engine = Some(backend);
+        self
+    }
+
+    #[must_use]
+    pub fn with_backend(mut self, backend: RuleBackend) -> Self {
+        self.identity.engine = Some(backend);
+        self
+    }
+
+    #[must_use]
+    pub fn with_primary(mut self, primary: Span) -> Self {
+        self.location.primary = Some(primary);
+        self
+    }
+
+    #[must_use]
+    pub fn with_secondary(mut self, secondary: Vec<Span>) -> Self {
+        self.location.secondary = secondary;
+        self
+    }
+
+    #[must_use]
+    pub fn with_help(mut self, help: String) -> Self {
+        self.diagnostic.help = Some(help);
+        self
+    }
+
+    #[must_use]
+    pub fn with_evidence(mut self, evidence: String) -> Self {
+        self.metadata.evidence = Some(evidence);
+        self
+    }
+
+    #[must_use]
+    pub fn with_confidence(mut self, confidence: String) -> Self {
+        self.metadata.confidence = Some(confidence);
+        self
+    }
+
+    #[must_use]
+    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
+        self.metadata.tags = tags;
+        self
+    }
+
+    #[must_use]
+    pub fn with_labels(mut self, labels: Vec<FindingLabel>) -> Self {
+        self.related.labels = labels;
+        self
+    }
+
+    #[must_use]
+    pub fn with_notes(mut self, notes: Vec<FindingNote>) -> Self {
+        self.related.notes = notes;
+        self
+    }
+
+    #[must_use]
+    pub fn with_fixes(mut self, fixes: Vec<Fix>) -> Self {
+        self.related.fixes = fixes;
+        self
+    }
+}
+
+impl Finding {
+    #[must_use]
+    pub fn rule_id(&self) -> &str {
+        &self.identity.rule_id
+    }
+
+    #[must_use]
+    pub fn severity(&self) -> Severity {
+        self.diagnostic.severity
+    }
+
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.diagnostic.message
+    }
+
+    #[must_use]
+    pub fn primary(&self) -> Option<&Span> {
+        self.location.primary.as_ref()
+    }
+
+    #[must_use]
+    pub fn secondary(&self) -> &[Span] {
+        &self.location.secondary
+    }
+
+    #[must_use]
+    pub fn help(&self) -> Option<&str> {
+        self.diagnostic.help.as_deref()
+    }
+
+    #[must_use]
+    pub fn evidence(&self) -> Option<&str> {
+        self.metadata.evidence.as_deref()
+    }
+
+    #[must_use]
+    pub fn labels(&self) -> &[FindingLabel] {
+        &self.related.labels
+    }
+
+    #[must_use]
+    pub fn notes(&self) -> &[FindingNote] {
+        &self.related.notes
+    }
+
+    #[must_use]
+    pub fn fixes(&self) -> &[Fix] {
+        &self.related.fixes
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,7 +358,7 @@ impl Report {
     pub fn worst_severity(&self) -> Severity {
         self.findings
             .iter()
-            .map(|f| f.severity)
+            .map(Finding::severity)
             .max_by_key(|s| s.exit_code())
             .unwrap_or(Severity::Info)
     }

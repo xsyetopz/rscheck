@@ -103,7 +103,7 @@ export function App() {
 						<Stack gap="sm">
 							<Title order={2}>Policy</Title>
 							<Text c="dimmed">
-								A v2 policy file sets engine mode, adapters, root rules, and
+								A v3 policy file sets channel mode, adapters, root rules, and
 								path-scoped overrides.
 							</Text>
 							<CodeHighlight

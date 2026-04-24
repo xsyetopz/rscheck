@@ -35,13 +35,13 @@ impl Runner {
         let mut emitter = ReportEmitter::new();
         let ctx = RuleContext { policy };
         for rule in rules::enabled_rules(policy) {
-            let info = rule.info();
-            if info.backend == RuleBackend::Semantic && !semantic_status.is_available() {
-                report.summary.skipped_rules.push(info.id.to_string());
+            let rule_info = rule.info();
+            if rule_info.backend == RuleBackend::Semantic && !semantic_status.is_available() {
+                report.summary.skipped_rules.push(rule_id(rule_info.id));
                 continue;
             }
-            if !report.summary.engine_used.contains(&info.backend) {
-                report.summary.engine_used.push(info.backend);
+            if !report.summary.engine_used.contains(&rule_info.backend) {
+                report.summary.engine_used.push(rule_info.backend);
             }
             rule.run(ws, &ctx, &mut emitter);
         }
@@ -58,6 +58,10 @@ impl Runner {
         });
         Ok(report)
     }
+}
+
+fn rule_id(id: &str) -> String {
+    id.to_string()
 }
 
 #[derive(Debug, thiserror::Error)]

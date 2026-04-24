@@ -17,7 +17,7 @@ fn f() {
 "#,
     );
     assert_eq!(findings.len(), 1);
-    assert!(findings[0].message.contains("/etc/passwd"));
+    assert!(findings[0].message().contains("/etc/passwd"));
 }
 
 #[test]

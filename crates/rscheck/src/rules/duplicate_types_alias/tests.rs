@@ -53,5 +53,5 @@ fn f(
     DuplicateTypesAliasCandidateRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
 
     assert_eq!(emitter.findings.len(), 1);
-    assert!(emitter.findings[0].message.contains("type alias"));
+    assert!(emitter.findings[0].message().contains("type alias"));
 }

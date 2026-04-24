@@ -1,6 +1,6 @@
-use crate::config::{AdapterToolchainMode, EngineMode, Policy, ToolchainMode};
-use crate::report::ToolchainSummary;
-use crate::semantic::SemanticBackendStatus;
+use rscheck::config::{AdapterToolchainMode, EngineMode, Policy, ToolchainMode};
+use rscheck::report::ToolchainSummary;
+use rscheck::semantic::SemanticBackendStatus;
 use std::io;
 use std::process::Command;
 
@@ -14,9 +14,44 @@ enum RustcChannel {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct ToolCommand {
+    program: String,
+    prefix_args: Vec<String>,
+}
+
+impl ToolCommand {
+    fn direct(program: &str) -> Self {
+        Self {
+            program: program.to_string(),
+            prefix_args: Vec::new(),
+        }
+    }
+
+    fn with_selector(program: &str, selector: &str) -> Self {
+        Self {
+            program: program.to_string(),
+            prefix_args: vec![format!("+{selector}")],
+        }
+    }
+
+    fn rustup_run(selector: &str, program: &str) -> Self {
+        Self {
+            program: "rustup".to_string(),
+            prefix_args: vec!["run".to_string(), selector.to_string(), program.to_string()],
+        }
+    }
+
+    pub(crate) fn command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command.args(&self.prefix_args);
+        command
+    }
+}
+
+#[derive(Debug, Clone)]
 struct ToolchainProbe {
     runtime_label: String,
-    cargo_selector: Option<String>,
+    cargo: ToolCommand,
     channel: RustcChannel,
 }
 
@@ -37,11 +72,11 @@ impl ResolvedToolchain {
         self.summary.clone()
     }
 
-    pub fn clippy_selector(
+    pub(crate) fn clippy_command(
         &self,
         mode: AdapterToolchainMode,
-    ) -> Result<Option<&str>, ToolchainError> {
-        Ok(self.clippy_probe(mode)?.cargo_selector.as_deref())
+    ) -> Result<ToolCommand, ToolchainError> {
+        Ok(self.clippy_probe(mode)?.cargo.clone())
     }
 
     pub fn clippy_runtime_label(
@@ -54,7 +89,7 @@ impl ResolvedToolchain {
     fn clippy_probe(&self, mode: AdapterToolchainMode) -> Result<&ToolchainProbe, ToolchainError> {
         match mode {
             AdapterToolchainMode::Inherit => Ok(&self.semantic),
-            AdapterToolchainMode::Current => Ok(&self.current),
+            AdapterToolchainMode::Stable => Ok(&self.current),
             AdapterToolchainMode::Nightly => self.nightly.as_ref().ok_or_else(|| {
                 ToolchainError::NightlyUnavailable("nightly cargo is unavailable".to_string())
             }),
@@ -115,7 +150,7 @@ fn select_semantic_probe(
     nightly: Option<&ToolchainProbe>,
 ) -> Result<ToolchainProbe, ToolchainError> {
     match requested {
-        ToolchainMode::Current => Ok(current.clone()),
+        ToolchainMode::Stable => Ok(current.clone()),
         ToolchainMode::Nightly => nightly.cloned().ok_or_else(|| {
             ToolchainError::NightlyUnavailable(
                 "nightly toolchain was requested but cargo cannot run it".to_string(),
@@ -142,35 +177,49 @@ fn probe_toolchain(
     selector: Option<&str>,
     runtime_label: &str,
 ) -> Result<ToolchainProbe, ToolchainError> {
-    verify_cargo_selector(selector, runtime_label)?;
-    let channel = probe_rustc_channel(selector, runtime_label)?;
+    let (cargo, rustc) = resolve_tool_commands(selector, runtime_label)?;
+    let channel = probe_rustc_channel(&rustc, runtime_label)?;
     Ok(ToolchainProbe {
         runtime_label: runtime_label.to_string(),
-        cargo_selector: selector.map(|value| format!("+{value}")),
+        cargo,
         channel,
     })
 }
 
-fn verify_cargo_selector(
+fn resolve_tool_commands(
     selector: Option<&str>,
     runtime_label: &str,
-) -> Result<(), ToolchainError> {
-    let mut command = Command::new("cargo");
-    if let Some(selector) = selector {
-        command.arg(format!("+{selector}"));
+) -> Result<(ToolCommand, ToolCommand), ToolchainError> {
+    let Some(selector) = selector else {
+        let cargo = ToolCommand::direct("cargo");
+        verify_tool_command(&cargo, runtime_label)?;
+        return Ok((cargo, ToolCommand::direct("rustc")));
+    };
+
+    let cargo_selector = ToolCommand::with_selector("cargo", selector);
+    if verify_tool_command(&cargo_selector, runtime_label).is_ok() {
+        return Ok((
+            cargo_selector,
+            ToolCommand::with_selector("rustc", selector),
+        ));
     }
+
+    let cargo_rustup = ToolCommand::rustup_run(selector, "cargo");
+    verify_tool_command(&cargo_rustup, runtime_label)?;
+    Ok((cargo_rustup, ToolCommand::rustup_run(selector, "rustc")))
+}
+
+fn verify_tool_command(command: &ToolCommand, runtime_label: &str) -> Result<(), ToolchainError> {
+    let mut command = command.command();
     command.arg("-V");
     run_probe(command, runtime_label)
 }
 
 fn probe_rustc_channel(
-    selector: Option<&str>,
+    rustc: &ToolCommand,
     runtime_label: &str,
 ) -> Result<RustcChannel, ToolchainError> {
-    let mut command = Command::new("rustc");
-    if let Some(selector) = selector {
-        command.arg(format!("+{selector}"));
-    }
+    let mut command = rustc.command();
     command.arg("-vV");
     let stdout = run_probe_capture(command, runtime_label)?;
     Ok(parse_channel(&stdout))
@@ -247,44 +296,11 @@ fn semantic_status_for_probe(probe: &ToolchainProbe) -> SemanticBackendStatus {
 
 fn toolchain_mode_name(mode: ToolchainMode) -> &'static str {
     match mode {
-        ToolchainMode::Current => "current",
+        ToolchainMode::Stable => "stable",
         ToolchainMode::Auto => "auto",
         ToolchainMode::Nightly => "nightly",
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        RustcChannel, ToolchainProbe, parse_channel, semantic_status_for_probe, stderr_reason,
-    };
-
-    #[test]
-    fn parses_nightly_release() {
-        let channel = parse_channel("release: 1.92.0-nightly\n");
-        assert_eq!(channel, RustcChannel::Nightly);
-    }
-
-    #[test]
-    fn semantic_status_requires_nightly_runtime() {
-        let probe = ToolchainProbe {
-            runtime_label: "current".to_string(),
-            cargo_selector: None,
-            channel: RustcChannel::Stable,
-        };
-        let status = semantic_status_for_probe(&probe);
-        assert!(!status.is_available());
-        assert!(
-            status
-                .reason
-                .as_deref()
-                .is_some_and(|reason| reason.contains("requires nightly rustc"))
-        );
-    }
-
-    #[test]
-    fn keeps_stderr_reason_text() {
-        let reason = stderr_reason(b"error: no such command: `+nightly`\n");
-        assert!(reason.contains("no such command"));
-    }
-}
+mod tests;

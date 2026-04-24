@@ -1,5 +1,5 @@
-use crate::fix::apply_text_edits;
-use crate::report::{FixSafety, Report, TextEdit};
+use rscheck::fix::apply_text_edits;
+use rscheck::report::{FixSafety, Report, TextEdit};
 use similar::TextDiff;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -14,7 +14,7 @@ pub enum ApplyError {
     #[error("failed to apply edits for file: {path}")]
     Apply {
         path: String,
-        source: crate::fix::FixError,
+        source: rscheck::fix::FixError,
     },
 }
 
@@ -30,29 +30,22 @@ impl PlannedEdits {
     }
 }
 
-pub fn plan_edits(report: &Report, include_unsafe: bool) -> PlannedEdits {
-    #[derive(Clone)]
-    struct EditWithMeta {
-        safety: FixSafety,
-        fix_id: String,
-        edit: TextEdit,
-    }
+#[derive(Clone)]
+struct EditWithMeta {
+    safety: FixSafety,
+    fix_id: String,
+    edit: TextEdit,
+}
 
+pub fn plan_edits(report: &Report, include_unsafe: bool) -> PlannedEdits {
     let mut by_file: BTreeMap<String, Vec<EditWithMeta>> = BTreeMap::new();
     for finding in &report.findings {
-        for fix in &finding.fixes {
+        for fix in finding.fixes() {
             if fix.safety == FixSafety::Unsafe && !include_unsafe {
                 continue;
             }
             for edit in &fix.edits {
-                by_file
-                    .entry(edit.file.clone())
-                    .or_default()
-                    .push(EditWithMeta {
-                        safety: fix.safety,
-                        fix_id: fix.id.clone(),
-                        edit: edit.clone(),
-                    });
+                insert_edit_with_meta(&mut by_file, fix, edit);
             }
         }
     }
@@ -78,10 +71,29 @@ pub fn plan_edits(report: &Report, include_unsafe: bool) -> PlannedEdits {
             chosen.push(e);
         }
 
-        planned.insert(file, chosen.into_iter().map(|e| e.edit).collect());
+        planned.insert(file, chosen_edits(chosen));
     }
 
     PlannedEdits { by_file: planned }
+}
+
+fn insert_edit_with_meta(
+    by_file: &mut BTreeMap<String, Vec<EditWithMeta>>,
+    fix: &rscheck::report::Fix,
+    edit: &TextEdit,
+) {
+    by_file
+        .entry(Clone::clone(&edit.file))
+        .or_default()
+        .push(EditWithMeta {
+            safety: fix.safety,
+            fix_id: Clone::clone(&fix.id),
+            edit: Clone::clone(edit),
+        });
+}
+
+fn chosen_edits(chosen: Vec<EditWithMeta>) -> Vec<TextEdit> {
+    Vec::from_iter(chosen.into_iter().map(|edit| edit.edit))
 }
 
 fn safety_rank(s: FixSafety) -> u8 {
@@ -105,19 +117,10 @@ pub fn apply_planned_edits(planned: &PlannedEdits) -> Result<bool, ApplyError> {
         if edits.is_empty() {
             continue;
         }
-        let old = fs::read_to_string(file).map_err(|source| ApplyError::Read {
-            path: file.clone(),
-            source,
-        })?;
-        let new = apply_text_edits(&old, edits).map_err(|source| ApplyError::Apply {
-            path: file.clone(),
-            source,
-        })?;
+        let old = read_edit_file(file)?;
+        let new = apply_file_edits(file, &old, edits)?;
         if new != old {
-            fs::write(file, new).map_err(|source| ApplyError::Write {
-                path: file.clone(),
-                source,
-            })?;
+            write_edit_file(file, new)?;
             changed = true;
         }
     }
@@ -130,28 +133,48 @@ pub fn print_dry_run(planned: &PlannedEdits) -> Result<bool, ApplyError> {
         if edits.is_empty() {
             continue;
         }
-        let old = fs::read_to_string(file).map_err(|source| ApplyError::Read {
-            path: file.clone(),
-            source,
-        })?;
-        let new = apply_text_edits(&old, edits).map_err(|source| ApplyError::Apply {
-            path: file.clone(),
-            source,
-        })?;
+        let old = read_edit_file(file)?;
+        let new = apply_file_edits(file, &old, edits)?;
         if new == old {
             continue;
         }
         would_change = true;
-        let diff = TextDiff::from_lines(&old, &new)
-            .unified_diff()
-            .header(
-                &format!("a/{}", display_path(file)),
-                &format!("b/{}", display_path(file)),
-            )
-            .to_string();
+        let diff = unified_diff(file, &old, &new);
         print!("{diff}");
     }
     Ok(would_change)
+}
+
+fn read_edit_file(file: &str) -> Result<String, ApplyError> {
+    fs::read_to_string(file).map_err(|source| ApplyError::Read {
+        path: file.to_string(),
+        source,
+    })
+}
+
+fn apply_file_edits(file: &str, old: &str, edits: &[TextEdit]) -> Result<String, ApplyError> {
+    apply_text_edits(old, edits).map_err(|source| ApplyError::Apply {
+        path: file.to_string(),
+        source,
+    })
+}
+
+fn write_edit_file(file: &str, new: String) -> Result<(), ApplyError> {
+    fs::write(file, new).map_err(|source| ApplyError::Write {
+        path: file.to_string(),
+        source,
+    })
+}
+
+fn unified_diff(file: &str, old: &str, new: &str) -> String {
+    TextDiff::from_lines(old, new)
+        .unified_diff()
+        .header(&diff_header("a", file), &diff_header("b", file))
+        .to_string()
+}
+
+fn diff_header(prefix: &str, file: &str) -> String {
+    format!("{prefix}/{}", display_path(file))
 }
 
 fn display_path(path: &str) -> String {

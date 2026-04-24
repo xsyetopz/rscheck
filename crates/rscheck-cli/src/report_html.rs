@@ -1,4 +1,5 @@
-use crate::report::{Report, Severity};
+use rscheck::report::{Report, Severity};
+use std::fmt::Write;
 
 pub fn to_html(report: &Report) -> String {
     let mut html = String::new();
@@ -17,30 +18,35 @@ pub fn to_html(report: &Report) -> String {
     html.push_str("<table><thead><tr><th>Severity</th><th>Rule</th><th>Location</th><th>Message</th></tr></thead><tbody>");
 
     for f in &report.findings {
-        let (sev_class, sev) = match f.severity {
-            Severity::Info => ("sev-info", "info"),
-            Severity::Warn => ("sev-warn", "warn"),
-            Severity::Deny => ("sev-deny", "deny"),
-        };
-        let loc = f.primary.as_ref().map_or_else(
-            || "".to_string(),
-            |s| format!("{}:{}:{}", s.file, s.start.line, s.start.column),
-        );
-        html.push_str(&format!(
-            "<tr><td class=\"{sev_class}\">{sev}</td><td><code>{}</code></td><td><code>{loc}</code></td><td>{}</td></tr>",
-            escape_html(&f.rule_id),
-            escape_html(&f.message)
-        ));
-        if let Some(evidence) = &f.evidence {
-            html.push_str(&format!(
-                "<tr><td colspan=\"4\"><pre>{}</pre></td></tr>",
-                escape_html(evidence)
-            ));
-        }
+        append_finding_rows(&mut html, f);
     }
 
     html.push_str("</tbody></table></body></html>");
     html
+}
+
+fn append_finding_rows(html: &mut String, f: &rscheck::report::Finding) {
+    let (sev_class, sev) = match f.severity() {
+        Severity::Info => ("sev-info", "info"),
+        Severity::Warn => ("sev-warn", "warn"),
+        Severity::Deny => ("sev-deny", "deny"),
+    };
+    let loc = f.primary().map_or_else(String::new, |s| {
+        format!("{}:{}:{}", s.file, s.start.line, s.start.column)
+    });
+    let _ = write!(
+        html,
+        "<tr><td class=\"{sev_class}\">{sev}</td><td><code>{}</code></td><td><code>{loc}</code></td><td>{}</td></tr>",
+        escape_html(f.rule_id()),
+        escape_html(f.message())
+    );
+    if let Some(evidence) = f.evidence() {
+        let _ = write!(
+            html,
+            "<tr><td colspan=\"4\"><pre>{}</pre></td></tr>",
+            escape_html(evidence)
+        );
+    }
 }
 
 fn escape_html(s: &str) -> String {

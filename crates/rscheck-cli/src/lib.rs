@@ -1,32 +1,21 @@
-pub mod analysis;
 mod cargo_clippy;
-pub mod config;
 mod config_file;
-pub mod emit;
-pub mod fix;
 mod fix_apply;
-mod path_pattern;
-pub mod policy;
-pub mod report;
 mod report_html;
 mod report_sarif;
-pub mod rules;
-pub mod runner;
-pub mod semantic;
-pub mod span;
-#[cfg(test)]
-pub(crate) mod test_support;
 mod text_report;
 mod toolchain;
 
-use crate::analysis::Workspace;
-use crate::config::{OutputFormat, Policy, ToolchainMode};
-use crate::report::{AdapterRun, Report};
-use crate::runner::Runner;
 use cargo_clippy::run_clippy;
 use clap::Parser;
-use config_file::{default_config_path, load_from, workspace_root, write_default_config};
+use config_file::{
+    default_config_path, load_from, migrate_from, workspace_root, write_default_config,
+};
 use fix_apply::{ApplyError, PlannedEdits, apply_planned_edits, plan_edits, print_dry_run};
+use rscheck::analysis::Workspace;
+use rscheck::config::{OutputFormat, Policy, ToolchainMode};
+use rscheck::report::{AdapterRun, Report};
+use rscheck::runner::Runner;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode as ProcessExitCode;
 use std::{fs, io};
@@ -62,6 +51,7 @@ pub enum Command {
     ListRules,
     Explain { rule_id: String },
     Init(InitArgs),
+    Migrate(MigrateArgs),
 }
 
 #[derive(Debug, clap::Args)]
@@ -124,7 +114,7 @@ pub struct CheckArgs {
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum ToolchainArg {
-    Current,
+    Stable,
     Auto,
     Nightly,
 }
@@ -132,7 +122,7 @@ pub enum ToolchainArg {
 impl From<ToolchainArg> for ToolchainMode {
     fn from(value: ToolchainArg) -> Self {
         match value {
-            ToolchainArg::Current => ToolchainMode::Current,
+            ToolchainArg::Stable => ToolchainMode::Stable,
             ToolchainArg::Auto => ToolchainMode::Auto,
             ToolchainArg::Nightly => ToolchainMode::Nightly,
         }
@@ -145,6 +135,15 @@ pub struct InitArgs {
     pub path: Option<PathBuf>,
 }
 
+#[derive(Debug, clap::Args)]
+pub struct MigrateArgs {
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
+    #[arg(long)]
+    pub write: bool,
+}
+
 pub fn main_entry() -> ExitCode {
     init_tracing();
     let cli = Cli::parse();
@@ -153,6 +152,7 @@ pub fn main_entry() -> ExitCode {
         Command::ListRules => run_list_rules(),
         Command::Explain { rule_id } => run_explain(&rule_id),
         Command::Init(args) => run_init(args),
+        Command::Migrate(args) => run_migrate(args),
     }
 }
 
@@ -163,7 +163,7 @@ fn init_tracing() {
 }
 
 fn run_list_rules() -> ExitCode {
-    for info in rules::rule_catalog() {
+    for info in rscheck::rules::rule_catalog() {
         println!(
             "{}\t{:?}\t{:?}\t{:?}\t{}",
             info.id, info.family, info.backend, info.default_level, info.summary
@@ -173,8 +173,10 @@ fn run_list_rules() -> ExitCode {
 }
 
 fn run_explain(rule_id: &str) -> ExitCode {
-    let info = rules::rule_catalog().into_iter().find(|i| i.id == rule_id);
-    match info {
+    let selected_rule = rscheck::rules::rule_catalog()
+        .into_iter()
+        .find(|i| i.id == rule_id);
+    match selected_rule {
         Some(info) => {
             println!(
                 "{}\n\nfamily: {:?}\nbackend: {:?}\ndefault: {:?}\nschema: {}\n\n{}\n",
@@ -216,6 +218,52 @@ fn run_init(args: InitArgs) -> ExitCode {
 
     println!("{}", path.to_string_lossy());
     ExitCode::from(0)
+}
+
+fn run_migrate(args: MigrateArgs) -> ExitCode {
+    let path = match args.config {
+        Some(path) => path,
+        None => match workspace_root() {
+            Ok(root) => default_config_path(&root),
+            Err(err) => {
+                eprintln!("{err}");
+                return ExitCode::from(2);
+            }
+        },
+    };
+    if !path.exists() {
+        eprintln!("config not found: {}", path.to_string_lossy());
+        return ExitCode::from(2);
+    }
+
+    let migration = match migrate_from(&path, args.write) {
+        Ok(migration) => migration,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::from(2);
+        }
+    };
+    if !migration.changed {
+        println!("config already v3: {}", path.to_string_lossy());
+        return ExitCode::from(0);
+    }
+
+    print_migration_changes(&path, &migration.changes);
+    if args.write {
+        println!("migrated config: {}", path.to_string_lossy());
+        return ExitCode::from(0);
+    }
+
+    println!("{}", migration.text);
+    eprintln!("rerun with `--write` to update {}", path.to_string_lossy());
+    ExitCode::from(1)
+}
+
+fn print_migration_changes(path: &Path, changes: &[String]) {
+    eprintln!("migration changes for {}:", path.to_string_lossy());
+    for change in changes {
+        eprintln!("- {change}");
+    }
 }
 
 fn run_check(args: CheckArgs) -> ExitCode {
@@ -266,7 +314,7 @@ fn load_check_policy(args: &CheckArgs, root: &Path) -> Result<Policy, ExitCode> 
             ExitCode::from(2)
         })?
     } else {
-        Policy::default_with_rules(rules::default_rule_settings())
+        Policy::default_with_rules(rscheck::rules::default_rule_settings())
     };
     if let Some(format) = args.out.format {
         policy.output.format = format.into();
@@ -287,7 +335,7 @@ fn execute_check_iterations(
     let mut last_report = Report::default();
 
     for is_last in (0..iterations).map(|iter| iter + 1 == iterations) {
-        let ws = match load_workspace(root.clone(), &policy) {
+        let ws = match load_iteration_workspace(&root, &policy) {
             Ok(ws) => ws,
             Err(code) => return code,
         };
@@ -311,6 +359,10 @@ fn execute_check_iterations(
     }
 
     finish_write_mode(&last_report, &policy)
+}
+
+fn load_iteration_workspace(root: &Path, policy: &Policy) -> Result<Workspace, ExitCode> {
+    load_workspace(root.to_path_buf(), policy)
 }
 
 fn iteration_count(args: &CheckArgs) -> u32 {
@@ -428,15 +480,15 @@ fn run_clippy_adapter(
     }
 
     ensure_clippy_adapter_run(report);
-    let toolchain = resolved_toolchain
-        .clippy_selector(policy.adapters.clippy.toolchain)
+    let cargo_command = resolved_toolchain
+        .clippy_command(policy.adapters.clippy.toolchain)
         .map_err(toolchain_error_to_exit_code)?;
     let runtime = resolved_toolchain
         .clippy_runtime_label(policy.adapters.clippy.toolchain)
         .map_err(toolchain_error_to_exit_code)?;
     let mut clippy_args = policy.adapters.clippy.args.clone();
     clippy_args.extend(cargo_args.iter().cloned());
-    let mut findings = run_clippy(&ws.root, toolchain, &clippy_args).map_err(|err| {
+    let mut findings = run_clippy(&ws.root, &cargo_command, &clippy_args).map_err(|err| {
         eprintln!("{err}");
         ExitCode::from(2)
     })?;

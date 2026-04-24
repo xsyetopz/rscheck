@@ -8,9 +8,13 @@ use std::path::{Path, PathBuf};
 
 use crate::report::Severity;
 
+mod migrate;
+
+pub use migrate::{MigrationError, MigrationResult, migrate_policy_text};
+
 pub type RuleTable = toml::Table;
 
-const CURRENT_POLICY_VERSION: u32 = 2;
+const CURRENT_POLICY_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -50,7 +54,7 @@ pub enum EngineMode {
 #[serde(rename_all = "lowercase")]
 pub enum ToolchainMode {
     #[default]
-    Current,
+    Stable,
     Auto,
     Nightly,
 }
@@ -60,7 +64,7 @@ pub enum ToolchainMode {
 pub enum AdapterToolchainMode {
     #[default]
     Inherit,
-    Current,
+    Stable,
     Auto,
     Nightly,
 }
@@ -95,7 +99,7 @@ impl Default for EngineConfig {
     fn default() -> Self {
         Self {
             semantic: EngineMode::Auto,
-            toolchain: ToolchainMode::Current,
+            toolchain: ToolchainMode::Stable,
             nightly_toolchain: Self::default_nightly_toolchain(),
         }
     }
@@ -352,7 +356,7 @@ pub enum ConfigError {
     Write { path: PathBuf, source: io::Error },
     #[error("policy version {version} is not supported: {path}")]
     UnsupportedVersion { path: PathBuf, version: u32 },
-    #[error("legacy config key `{key}` is not supported in v2: {path}. {message}")]
+    #[error("legacy config key `{key}` is not supported in v3: {path}. {message}")]
     LegacyKey {
         path: PathBuf,
         key: String,
@@ -452,11 +456,7 @@ fn validate_legacy_shape(table: &RuleTable, path: &Path) -> Result<(), ConfigErr
     if let Some(rules) = table.get("rules").and_then(toml::Value::as_table) {
         for key in rules.keys() {
             if !key.contains('.') {
-                return Err(ConfigError::LegacyKey {
-                    path: path.to_path_buf(),
-                    key: format!("rules.{key}"),
-                    message: "Use dot rule IDs such as `shape.file_complexity`.".to_string(),
-                });
+                return Err(legacy_rule_key_error(path, key));
             }
         }
     }
@@ -476,10 +476,22 @@ fn merge_tables(into: &mut RuleTable, overlay: &RuleTable) {
         match (into.get_mut(key), value) {
             (Some(toml::Value::Table(dst)), toml::Value::Table(src)) => merge_tables(dst, src),
             _ => {
-                into.insert(key.clone(), value.clone());
+                insert_overlay_value(into, key, value);
             }
         }
     }
+}
+
+fn legacy_rule_key_error(path: &Path, key: &str) -> ConfigError {
+    ConfigError::LegacyKey {
+        path: path.to_path_buf(),
+        key: format!("rules.{key}"),
+        message: String::from("Use dot rule IDs such as `shape.file_complexity`."),
+    }
+}
+
+fn insert_overlay_value(into: &mut RuleTable, key: &str, value: &toml::Value) {
+    into.insert(key.to_string(), Clone::clone(value));
 }
 
 fn scope_matches(scope: &ScopeConfig, file_path: Option<&Path>) -> bool {
@@ -864,6 +876,227 @@ impl RuleOptions for PublicApiErrorsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalTestModulesConfig {
+    #[serde(default = "ExternalTestModulesConfig::default_level")]
+    pub level: Level,
+    #[serde(default = "ExternalTestModulesConfig::default_module_name")]
+    pub module_name: String,
+    #[serde(default = "ExternalTestModulesConfig::default_expected_file")]
+    pub expected_file: String,
+}
+
+impl ExternalTestModulesConfig {
+    fn default_level() -> Level {
+        Level::Deny
+    }
+
+    fn default_module_name() -> String {
+        "tests".to_string()
+    }
+
+    fn default_expected_file() -> String {
+        "tests.rs".to_string()
+    }
+}
+
+impl Default for ExternalTestModulesConfig {
+    fn default() -> Self {
+        Self {
+            level: Self::default_level(),
+            module_name: Self::default_module_name(),
+            expected_file: Self::default_expected_file(),
+        }
+    }
+}
+
+impl RuleOptions for ExternalTestModulesConfig {
+    fn default_level() -> Level {
+        Self::default_level()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NamingPolicyConfig {
+    #[serde(default = "NamingPolicyConfig::default_level")]
+    pub level: Level,
+    #[serde(default = "NamingPolicyConfig::default_banned_names")]
+    pub banned_names: Vec<String>,
+    #[serde(default = "NamingPolicyConfig::default_banned_suffixes")]
+    pub banned_suffixes: Vec<String>,
+}
+
+impl NamingPolicyConfig {
+    fn default_level() -> Level {
+        Level::Warn
+    }
+
+    fn default_banned_names() -> Vec<String> {
+        [
+            "data", "result", "temp", "info", "handle", "process", "manager", "helper", "util",
+            "item", "value", "obj",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    }
+
+    fn default_banned_suffixes() -> Vec<String> {
+        vec![
+            "Manager".to_string(),
+            "Helper".to_string(),
+            "Util".to_string(),
+        ]
+    }
+}
+
+impl Default for NamingPolicyConfig {
+    fn default() -> Self {
+        Self {
+            level: Self::default_level(),
+            banned_names: Self::default_banned_names(),
+            banned_suffixes: Self::default_banned_suffixes(),
+        }
+    }
+}
+
+impl RuleOptions for NamingPolicyConfig {
+    fn default_level() -> Level {
+        Self::default_level()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GodObjectConfig {
+    #[serde(default = "GodObjectConfig::default_level")]
+    pub level: Level,
+    #[serde(default = "GodObjectConfig::default_max_fields")]
+    pub max_fields: usize,
+    #[serde(default = "GodObjectConfig::default_max_variants")]
+    pub max_variants: usize,
+    #[serde(default = "GodObjectConfig::default_max_methods")]
+    pub max_methods: usize,
+}
+
+impl GodObjectConfig {
+    fn default_level() -> Level {
+        Level::Warn
+    }
+
+    fn default_max_fields() -> usize {
+        12
+    }
+
+    fn default_max_variants() -> usize {
+        20
+    }
+
+    fn default_max_methods() -> usize {
+        20
+    }
+}
+
+impl Default for GodObjectConfig {
+    fn default() -> Self {
+        Self {
+            level: Self::default_level(),
+            max_fields: Self::default_max_fields(),
+            max_variants: Self::default_max_variants(),
+            max_methods: Self::default_max_methods(),
+        }
+    }
+}
+
+impl RuleOptions for GodObjectConfig {
+    fn default_level() -> Level {
+        Self::default_level()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HotPathAllocationsConfig {
+    #[serde(default = "HotPathAllocationsConfig::default_level")]
+    pub level: Level,
+    #[serde(default = "HotPathAllocationsConfig::default_methods")]
+    pub methods: Vec<String>,
+    #[serde(default = "HotPathAllocationsConfig::default_macros")]
+    pub macros: Vec<String>,
+}
+
+impl HotPathAllocationsConfig {
+    fn default_level() -> Level {
+        Level::Warn
+    }
+
+    fn default_methods() -> Vec<String> {
+        ["clone", "to_string", "to_owned", "collect"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn default_macros() -> Vec<String> {
+        ["format", "vec"].into_iter().map(str::to_string).collect()
+    }
+}
+
+impl Default for HotPathAllocationsConfig {
+    fn default() -> Self {
+        Self {
+            level: Self::default_level(),
+            methods: Self::default_methods(),
+            macros: Self::default_macros(),
+        }
+    }
+}
+
+impl RuleOptions for HotPathAllocationsConfig {
+    fn default_level() -> Level {
+        Self::default_level()
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CustomPattern {
+    pub name: String,
+    pub regex: String,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub include: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomPatternConfig {
+    #[serde(default = "CustomPatternConfig::default_level")]
+    pub level: Level,
+    #[serde(default)]
+    pub patterns: Vec<CustomPattern>,
+}
+
+impl CustomPatternConfig {
+    fn default_level() -> Level {
+        Level::Allow
+    }
+}
+
+impl Default for CustomPatternConfig {
+    fn default() -> Self {
+        Self {
+            level: Self::default_level(),
+            patterns: Vec::new(),
+        }
+    }
+}
+
+impl RuleOptions for CustomPatternConfig {
+    fn default_level() -> Level {
+        Self::default_level()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerRuleSet {
     pub name: String,
     #[serde(default)]
@@ -913,54 +1146,4 @@ impl fmt::Display for OutputFormat {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{ConfigError, Level, Policy};
-    use std::fs;
-
-    #[test]
-    fn rejects_legacy_human_format() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(".rscheck.toml");
-        fs::write(&path, "[output]\nformat = \"human\"\n").unwrap();
-
-        let err = Policy::from_path(&path).unwrap_err();
-        assert!(matches!(err, ConfigError::LegacyKey { .. }));
-        assert!(err.to_string().contains("text"));
-    }
-
-    #[test]
-    fn merges_extended_policy() {
-        let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("base.toml");
-        let child = dir.path().join("child.toml");
-
-        fs::write(
-            &base,
-            "version = 2\n[rules.\"shape.file_complexity\"]\nlevel = \"warn\"\nmax_file = 10\n",
-        )
-        .unwrap();
-        fs::write(
-            &child,
-            "version = 2\nextends = [\"base.toml\"]\n[rules.\"shape.file_complexity\"]\nmax_fn = 2\n",
-        )
-        .unwrap();
-
-        let policy = Policy::from_path(&child).unwrap();
-        let settings = policy.rule_settings("shape.file_complexity", None, Level::Warn);
-        assert_eq!(settings.level, Some(Level::Warn));
-        assert_eq!(
-            settings
-                .options
-                .get("max_file")
-                .and_then(toml::Value::as_integer),
-            Some(10)
-        );
-        assert_eq!(
-            settings
-                .options
-                .get("max_fn")
-                .and_then(toml::Value::as_integer),
-            Some(2)
-        );
-    }
-}
+mod tests;

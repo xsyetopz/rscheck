@@ -2,24 +2,50 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
 
 jobs:
   rust:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [ stable, nightly ]
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: clippy,rustfmt
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Check workspace
         run: cargo check --workspace --tests
+      - name: Check all features
+        run: cargo check --workspace --all-features
       - name: Test Rust workspace
         run: cargo test --workspace
       - name: Lint Rust workspace
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  rscheck-self:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - name: Install nightly for advisory audit
+        run: rustup toolchain install nightly --component clippy --component rustfmt
+      - name: Gate rscheck with rscheck
+        run: cargo run -p rscheck-cli --bin rscheck -- check --config .rscheck.toml
+          --toolchain stable --format text -- --all-targets
+      - name: Full rscheck self-audit
+        run: cargo run -p rscheck-cli --bin rscheck -- check --config
+          crates/rscheck-self-audit.toml --toolchain nightly --format json
+          --output target/rscheck-self-audit.json -- --all-targets
 
   frontend-lint:
     runs-on: ubuntu-latest

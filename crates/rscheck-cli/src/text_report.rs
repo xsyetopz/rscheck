@@ -1,10 +1,13 @@
-use crate::fix::line_col_to_byte_offset;
-use crate::report::{
+use annotate_snippets::{
+    AnnotationKind, Group, Level, Patch, Renderer, Snippet, renderer::DecorStyle,
+};
+use rscheck::fix::line_col_to_byte_offset;
+use rscheck::report::{
     Finding, FindingLabel, FindingLabelKind, FindingNoteKind, FixSafety, Report, Severity,
 };
-use annotate_snippets::{AnnotationKind, Group, Level, Renderer, Snippet};
 use std::collections::BTreeMap;
 use std::env::current_dir;
+use std::fmt::Write;
 use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -22,7 +25,7 @@ struct TextReportRenderer {
 impl TextReportRenderer {
     fn new() -> Self {
         Self {
-            renderer: Renderer::plain(),
+            renderer: Renderer::plain().decor_style(DecorStyle::Unicode),
             cwd: current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             source_cache: BTreeMap::new(),
         }
@@ -51,7 +54,7 @@ impl TextReportRenderer {
         if !report.summary.skipped_rules.is_empty() {
             out.push_str("\nskipped semantic rules:\n");
             for rule in &report.summary.skipped_rules {
-                out.push_str(&format!("- {rule}\n"));
+                let _ = writeln!(&mut out, "- {rule}");
             }
         }
 
@@ -65,10 +68,11 @@ impl TextReportRenderer {
             return fallback_line(finding);
         }
 
-        let mut message = Group::with_title(
-            level_for(finding.severity)
-                .primary_title(format!("[{}] {}", finding.rule_id, finding.message)),
-        );
+        let mut message = Group::with_title(level_for(finding.severity()).primary_title(format!(
+            "[{}] {}",
+            finding.rule_id(),
+            finding.message()
+        )));
         for group in &snippet_groups {
             let mut snippet = Snippet::source(&group.source)
                 .line_start(1)
@@ -80,30 +84,52 @@ impl TextReportRenderer {
                 };
                 snippet = snippet.annotation(
                     annotation
-                        .span(label.range.clone())
+                        .span(label_range(label))
                         .label(label.message.as_str()),
                 );
             }
             message = message.element(snippet);
         }
 
-        let mut out = self.renderer.render(&[message]).to_string();
+        let mut report_groups = vec![message];
+        report_groups.extend(self.build_patch_groups(finding));
+        let mut out = self.renderer.render(&report_groups).to_string();
         append_text_notes(&mut out, finding);
         out
+    }
+
+    fn build_patch_groups(&mut self, finding: &Finding) -> Vec<Group<'static>> {
+        let mut groups = Vec::new();
+        for fix in finding.fixes() {
+            let title = suggestion_title(finding.severity(), &fix.message);
+            let mut group = Group::with_title(title);
+            for edit in &fix.edits {
+                let Some(source) = self.read_source_owned(&edit.file) else {
+                    continue;
+                };
+                let display_path = display_path(&self.cwd, Path::new(&edit.file));
+                let patch = patch_for_edit(edit);
+                group = group.element(
+                    Snippet::source(source)
+                        .line_start(1)
+                        .path(display_path)
+                        .patch(patch),
+                );
+            }
+            groups.push(group);
+        }
+        groups
     }
 
     fn build_snippet_groups(&mut self, labels: &[FindingLabel]) -> Vec<RenderedSnippetGroup> {
         let mut grouped: BTreeMap<String, Vec<FindingLabel>> = BTreeMap::new();
         for label in labels {
-            grouped
-                .entry(label.span.file.clone())
-                .or_default()
-                .push(label.clone());
+            insert_grouped_label(&mut grouped, label);
         }
 
         let mut snippets = Vec::new();
         for (file, file_labels) in grouped {
-            let Some(source) = self.read_source(&file).clone() else {
+            let Some(source) = self.read_source_owned(&file) else {
                 continue;
             };
             let display_path = display_path(&self.cwd, Path::new(&file));
@@ -150,6 +176,33 @@ impl TextReportRenderer {
                 fs::read_to_string(path).ok()
             })
     }
+
+    fn read_source_owned(&mut self, file: &str) -> Option<String> {
+        Clone::clone(self.read_source(file))
+    }
+}
+
+fn label_range(label: &RenderedLabel) -> Range<usize> {
+    Clone::clone(&label.range)
+}
+
+fn suggestion_title(severity: Severity, message: &str) -> annotate_snippets::Title<'static> {
+    level_for(severity).secondary_title(format!("suggestion: {message}"))
+}
+
+fn patch_for_edit(edit: &rscheck::report::TextEdit) -> Patch<'static> {
+    Patch::new(
+        usize::try_from(edit.byte_start).unwrap_or(usize::MAX)
+            ..usize::try_from(edit.byte_end).unwrap_or(usize::MAX),
+        Clone::clone(&edit.replacement),
+    )
+}
+
+fn insert_grouped_label(grouped: &mut BTreeMap<String, Vec<FindingLabel>>, label: &FindingLabel) {
+    grouped
+        .entry(Clone::clone(&label.span.file))
+        .or_default()
+        .push(Clone::clone(label));
 }
 
 #[derive(Clone)]
@@ -167,67 +220,79 @@ struct RenderedLabel {
 }
 
 fn normalize_labels(finding: &Finding) -> Vec<FindingLabel> {
-    if !finding.labels.is_empty() {
-        return finding.labels.clone();
+    if !finding.labels().is_empty() {
+        return Vec::from(finding.labels());
     }
 
     let mut labels = Vec::new();
-    if let Some(primary) = &finding.primary {
-        labels.push(FindingLabel {
-            kind: FindingLabelKind::Primary,
-            span: primary.clone(),
-            message: Some(finding.message.clone()),
-        });
+    if let Some(primary) = finding.primary() {
+        labels.push(primary_label(primary, finding.message()));
     }
-    for secondary in &finding.secondary {
-        labels.push(FindingLabel {
-            kind: FindingLabelKind::Secondary,
-            span: secondary.clone(),
-            message: None,
-        });
+    for secondary in finding.secondary() {
+        labels.push(secondary_label(secondary));
     }
     labels
 }
 
+fn primary_label(primary: &rscheck::span::Span, message: &str) -> FindingLabel {
+    FindingLabel {
+        kind: FindingLabelKind::Primary,
+        span: Clone::clone(primary),
+        message: Some(String::from(message)),
+    }
+}
+
+fn secondary_label(secondary: &rscheck::span::Span) -> FindingLabel {
+    FindingLabel {
+        kind: FindingLabelKind::Secondary,
+        span: Clone::clone(secondary),
+        message: None,
+    }
+}
+
 fn append_text_notes(out: &mut String, finding: &Finding) {
-    if let Some(help) = &finding.help {
+    if let Some(help) = finding.help() {
         out.push_str(&format!("help: {help}\n"));
     }
-    if let Some(evidence) = &finding.evidence {
+    if let Some(evidence) = finding.evidence() {
         out.push_str(&format!("note: {evidence}\n"));
     }
-    if let Some(confidence) = &finding.confidence {
+    if let Some(confidence) = finding.metadata.confidence.as_deref() {
         out.push_str(&format!("info: confidence={confidence}\n"));
     }
-    for note in &finding.notes {
+    for note in finding.notes() {
         let prefix = match note.kind {
             FindingNoteKind::Help => "help",
             FindingNoteKind::Note => "note",
             FindingNoteKind::Info => "info",
         };
-        out.push_str(&format!("{prefix}: {}\n", note.message));
+        let _ = writeln!(out, "{prefix}: {}", note.message);
     }
-    for fix in &finding.fixes {
+    for fix in finding.fixes() {
         let safety = match fix.safety {
             FixSafety::Safe => "safe",
             FixSafety::Unsafe => "unsafe",
         };
-        out.push_str(&format!("suggestion[{safety}]: {}\n", fix.message));
+        let _ = writeln!(out, "suggestion[{safety}]: {}", fix.message);
     }
 }
 
 fn fallback_line(finding: &Finding) -> String {
-    let severity = match finding.severity {
+    let severity = match finding.severity() {
         Severity::Info => "info",
         Severity::Warn => "warning",
         Severity::Deny => "error",
     };
-    match &finding.primary {
+    match finding.primary() {
         Some(span) => format!(
             "{severity}[{}]: {} at {}:{}:{}\n",
-            finding.rule_id, finding.message, span.file, span.start.line, span.start.column
+            finding.rule_id(),
+            finding.message(),
+            span.file,
+            span.start.line,
+            span.start.column
         ),
-        None => format!("{severity}[{}]: {}\n", finding.rule_id, finding.message),
+        None => format!("{severity}[{}]: {}\n", finding.rule_id(), finding.message()),
     }
 }
 
@@ -247,72 +312,4 @@ fn display_path(cwd: &Path, path: &Path) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::render_text_report;
-    use crate::report::{Finding, FindingLabel, FindingLabelKind, Report, Severity};
-    use crate::span::{Location, Span};
-
-    #[test]
-    fn renders_fallback_when_source_missing() {
-        let report = Report {
-            findings: vec![Finding {
-                rule_id: "demo.rule".to_string(),
-                family: None,
-                engine: None,
-                severity: Severity::Warn,
-                message: "warning text".to_string(),
-                primary: Some(Span {
-                    file: "missing.rs".to_string(),
-                    start: Location { line: 1, column: 1 },
-                    end: Location { line: 1, column: 3 },
-                }),
-                secondary: Vec::new(),
-                help: None,
-                evidence: None,
-                confidence: None,
-                tags: Vec::new(),
-                labels: Vec::new(),
-                notes: Vec::new(),
-                fixes: Vec::new(),
-            }],
-            ..Report::default()
-        };
-
-        let text = render_text_report(&report);
-        assert!(text.contains("warning[demo.rule]: warning text"));
-    }
-
-    #[test]
-    fn prefers_structured_labels() {
-        let report = Report {
-            findings: vec![Finding {
-                rule_id: "demo.rule".to_string(),
-                family: None,
-                engine: None,
-                severity: Severity::Warn,
-                message: "warning text".to_string(),
-                primary: None,
-                secondary: Vec::new(),
-                help: None,
-                evidence: None,
-                confidence: None,
-                tags: Vec::new(),
-                labels: vec![FindingLabel {
-                    kind: FindingLabelKind::Primary,
-                    span: Span {
-                        file: "missing.rs".to_string(),
-                        start: Location { line: 1, column: 1 },
-                        end: Location { line: 1, column: 3 },
-                    },
-                    message: Some("label".to_string()),
-                }],
-                notes: Vec::new(),
-                fixes: Vec::new(),
-            }],
-            ..Report::default()
-        };
-
-        let text = render_text_report(&report);
-        assert!(text.contains("warning[demo.rule]: warning text"));
-    }
-}
+mod tests;

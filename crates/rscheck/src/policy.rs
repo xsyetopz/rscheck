@@ -1,5 +1,9 @@
 pub use crate::config::{
-    AdaptersConfig, ClippyAdapterConfig, ConfigError, EngineConfig, EngineMode, Level,
-    OutputConfig, OutputFormat, Policy, PublicApiErrorsConfig, RuleOptions, RuleSettings,
-    ScopeConfig, WorkspaceConfig,
+    AbsoluteFilesystemPathsConfig, AbsoluteModulePathsConfig, AdapterToolchainMode, AdaptersConfig,
+    BannedDependenciesConfig, ClippyAdapterConfig, ComplexityMode, ConfigError, CustomPattern,
+    CustomPatternConfig, DuplicateLogicConfig, DuplicateTypesAliasConfig, EngineConfig, EngineMode,
+    ExternalTestModulesConfig, FileComplexityConfig, GodObjectConfig, HotPathAllocationsConfig,
+    LayerDirectionConfig, LayerRuleSet, Level, NamingPolicyConfig, OutputConfig, OutputFormat,
+    Policy, PublicApiErrorsConfig, RuleOptions, RuleSettings, ScopeConfig, SrpHeuristicConfig,
+    ToolchainMode, WorkspaceConfig,
 };

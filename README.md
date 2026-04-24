@@ -81,14 +81,16 @@ rscheck explain shape.file_complexity
 
 ## Configuration
 
-`rscheck` reads `.rscheck.toml` from the workspace root. The v2 config uses
-engine mode, adapters, dot-form rule IDs, and path-scoped overrides.
+`rscheck` reads `.rscheck.toml` from the workspace root. The v3 config uses
+stable/nightly channel selection, adapters, dot-form rule IDs, and path-scoped overrides.
 
 ```toml
-version = 2
+version = 3
 
 [engine]
 semantic = "auto"
+toolchain = "stable"
+nightly_toolchain = "nightly"
 
 [workspace]
 include = ["**/*.rs"]
@@ -100,6 +102,7 @@ format = "text"
 
 [adapters.clippy]
 enabled = true
+toolchain = "inherit"
 args = []
 
 [rules."architecture.qualified_module_paths"]
@@ -119,6 +122,15 @@ max_fn = 25
 level = "deny"
 banned_prefixes = ["std::process::Command"]
 
+[rules."testing.external_test_modules"]
+level = "deny"
+
+[rules."design.naming_policy"]
+level = "warn"
+
+[rules."perf.hot_path_allocations"]
+level = "warn"
+
 [[scope]]
 include = ["crates/rscheck-cli/**"]
 
@@ -127,9 +139,12 @@ max_file = 260
 max_fn = 35
 ```
 
-`semantic = "auto"` runs syntax rules on stable and runs semantic checks when
-the semantic backend is available. `require` fails the run if that backend is
-missing. `off` disables semantic rules.
+`toolchain = "stable"` runs stable syntax rules and the Clippy adapter.
+`toolchain = "nightly"` requires a nightly cargo/rustc selector.
+`toolchain = "auto"` uses nightly for semantic checks when available and
+falls back to stable when semantic checks are not required.
+`semantic = "require"` fails the run if the semantic backend is unavailable;
+`off` disables semantic rules.
 
 ## Rule Families
 
@@ -138,6 +153,9 @@ Current built-in families include:
 - `design.*`
 - `shape.*`
 - `portability.*`
+- `testing.*`
+- `perf.*`
+- `pattern.*`
 
 Current rules include:
 - `architecture.qualified_module_paths`
@@ -145,10 +163,15 @@ Current rules include:
 - `architecture.layer_direction`
 - `design.public_api_errors`
 - `design.repeated_type_aliases`
+- `design.naming_policy`
+- `design.god_object`
 - `shape.file_complexity`
 - `shape.duplicate_logic`
 - `shape.responsibility_split`
 - `portability.absolute_literal_paths`
+- `testing.external_test_modules`
+- `perf.hot_path_allocations`
+- `pattern.custom`
 
 ## Use As A Library
 

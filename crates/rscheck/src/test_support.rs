@@ -8,9 +8,18 @@ use crate::rules::{Rule, RuleContext};
 use std::fs;
 
 pub(crate) fn workspace_from_code(code: &str) -> Workspace {
+    workspace_from_files(&[("lib.rs", code)])
+}
+
+pub(crate) fn workspace_from_files(files: &[(&str, &str)]) -> Workspace {
     let dir = tempfile::tempdir().expect("tempdir");
-    let file = dir.path().join("lib.rs");
-    fs::write(&file, code).expect("write test source");
+    for (relative_path, code) in files {
+        let file = dir.path().join(relative_path);
+        if let Some(parent) = file.parent() {
+            fs::create_dir_all(parent).expect("create test source parent");
+        }
+        fs::write(file, code).expect("write test source");
+    }
     let root = dir.keep();
     Workspace::new(root)
         .load_files(&Policy::default())

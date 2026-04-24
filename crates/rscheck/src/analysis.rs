@@ -77,7 +77,7 @@ impl Workspace {
             let ast = match syn::parse_file(&text) {
                 Ok(ast) => Some(ast),
                 Err(err) => {
-                    parse_error = Some(err.to_string());
+                    parse_error = Some(parse_error_text(&err));
                     None
                 }
             };
@@ -97,7 +97,7 @@ fn build_globset(patterns: &[String]) -> Result<GlobSet, DiscoverError> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
         let glob = Glob::new(pattern).map_err(|source| DiscoverError::Glob {
-            pattern: pattern.clone(),
+            pattern: pattern_text(pattern),
             source,
         })?;
         builder.add(glob);
@@ -106,4 +106,12 @@ fn build_globset(patterns: &[String]) -> Result<GlobSet, DiscoverError> {
         pattern: "<globset>".to_string(),
         source,
     })
+}
+
+fn parse_error_text(err: &syn::Error) -> String {
+    err.to_string()
+}
+
+fn pattern_text(pattern: &str) -> String {
+    pattern.to_string()
 }

@@ -52,5 +52,5 @@ fn b(y: i32) -> i32 {
     DuplicateLogicRule.run(&ws, &RuleContext { policy: &cfg }, &mut emitter);
 
     assert_eq!(emitter.findings.len(), 1);
-    assert!(emitter.findings[0].message.contains("similarity"));
+    assert!(emitter.findings[0].message().contains("similarity"));
 }
