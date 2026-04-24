@@ -6,7 +6,7 @@ rust-version.workspace = true
 homepage.workspace = true
 license.workspace = true
 repository.workspace = true
-publish.workspace = true
+publish = true
 readme.workspace = true
 
 description = "Library for checking Rust workspaces against layered rules."
@@ -21,7 +21,7 @@ ignore = "0.4.25"
 proc-macro2 = { version = "1.0.106", features = ["span-locations"] }
 quote = "1.0.45"
 regex = "1.12.3"
-rscheck-semantic = { path = "../rscheck-semantic" }
+rscheck-semantic = { version = "0.1.0", path = "../rscheck-semantic" }
 serde = { version = "1.0.228", features = ["derive"] }
 similar = "3.0.0"
 syn = { version = "2.0.117", features = ["full", "visit"] }

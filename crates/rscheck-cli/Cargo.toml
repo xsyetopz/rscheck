@@ -19,7 +19,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 cargo_metadata = "0.23.1"
-rscheck = { path = "../rscheck" }
+rscheck = { version = "0.1.0", path = "../rscheck" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 similar = "3.1.0"
