@@ -197,11 +197,22 @@ println!("{:#?}", report.worst_severity());
 
 ## Release
 
-Manual release flow for the `rscheck-cli` package:
+Manual release flow for the published crate family:
 
 ```bash
-cargo test -p rscheck-cli
+cargo test --workspace
+cargo package --list -p rscheck-semantic
+cargo package --list -p rscheck
 cargo package --list -p rscheck-cli
+
+cargo publish --dry-run -p rscheck-semantic
+cargo publish -p rscheck-semantic
+
+# Wait until crates.io can resolve rscheck-semantic.
+cargo publish --dry-run -p rscheck
+cargo publish -p rscheck
+
+# Wait until crates.io can resolve rscheck.
 cargo publish --dry-run -p rscheck-cli
 cargo publish -p rscheck-cli
 ```
